@@ -18,6 +18,7 @@ import {
 } from 'lucide-vue-next'
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
+import { TextStyleMark } from '../lib/textStyle'
 import type { Article, CanvasItem, QuizQuestion } from '../types'
 
 const route = useRoute()
@@ -46,6 +47,7 @@ const hoveredBlock = ref<{ top: number; left: number; index: number } | null>(nu
 const blockDragState = ref<{ index: number } | null>(null)
 const activeCanvasItemId = ref<string | null>(null)
 const quizQuestions = ref<QuizQuestion[]>([])
+const previewQuizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
 const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(null)
 const resizeState = ref<{ id: string; corner: string; startX: number; startY: number; x: number; y: number; w: number; h: number } | null>(null)
 const activeDrawingId = ref<string | null>(null)
@@ -67,6 +69,7 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
   const defaultY = paperRect && contentRect
     ? Math.max(260, contentRect.bottom - paperRect.top + 24) + canvasItems.value.length * 22
     : 260 + canvasItems.value.length * 42
+  const defaultZIndex = Math.max(0, ...canvasItems.value.map((item) => item.zIndex ?? 0)) + 1
   return {
     id: crypto.randomUUID(),
     type,
@@ -74,8 +77,14 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
     y: overrides.y ?? defaultY,
     w: overrides.w ?? base.w,
     h: overrides.h ?? base.h,
+    zIndex: overrides.zIndex ?? defaultZIndex,
     content: overrides.content ?? base.content,
     color: overrides.color ?? (type === 'shape' ? '#b96c50' : undefined),
+    fillColor: overrides.fillColor,
+    strokeWidth: overrides.strokeWidth ?? 2,
+    cornerRadius: overrides.cornerRadius ?? 8,
+    textColor: overrides.textColor ?? '#3a3430',
+    fontSize: overrides.fontSize ?? 14,
     shape: overrides.shape,
     strokes: overrides.strokes ?? (type === 'drawing' ? [] : undefined),
   }
@@ -285,6 +294,33 @@ function getQuizQuestion(item: CanvasItem) {
   return quizQuestions.value.find((question) => question.id === item.questionId)
 }
 
+function getPreviewQuizResponse(question: QuizQuestion) {
+  previewQuizResponses.value[question.id] ??= { selectedIndex: null, text: '', submitted: false }
+  return previewQuizResponses.value[question.id]
+}
+
+function isPreviewQuizCorrect(question: QuizQuestion) {
+  const response = getPreviewQuizResponse(question)
+  return question.type === 'text'
+    ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
+    : response.selectedIndex === question.answerIndex
+}
+
+function submitPreviewQuiz(question: QuizQuestion) {
+  getPreviewQuizResponse(question).submitted = true
+}
+
+function applyBodyTextStyle(attribute: 'color' | 'fontSize', event: Event) {
+  const input = event.target as HTMLInputElement
+  if (attribute === 'fontSize') {
+    const fontSize = Number(input.value)
+    if (!Number.isFinite(fontSize) || fontSize < 1 || fontSize > 200) return
+    editor.value?.chain().focus().setMark('textStyle', { fontSize }).run()
+    return
+  }
+  editor.value?.chain().focus().setMark('textStyle', { color: input.value }).run()
+}
+
 function getDrawingPoint(svg: SVGSVGElement, event: PointerEvent) {
   const rect = svg.getBoundingClientRect()
   return {
@@ -329,10 +365,11 @@ const SpeechBlockquote = Blockquote.extend({
 })
 
 const editor = useEditor({
-  content: '<p>ここから記事を書き始めましょう。テキストを選択してツールバーから見出しや装飾を追加できます。</p>',
+  content: '<p></p>',
   extensions: [
     StarterKit.configure({ blockquote: false }),
     SpeechBlockquote,
+    TextStyleMark,
     Image.configure({ inline: false, allowBase64: true }),
     Table.configure({ resizable: true }),
     TableRow,
@@ -369,7 +406,10 @@ onMounted(async () => {
         tagsInput.value = existing.tags.join(', ')
         cover.value = existing.cover
         authorId.value = existing.authorId ?? authorId.value
-        canvasItems.value = existing.canvas?.items ?? []
+        canvasItems.value = (existing.canvas?.items ?? []).map((item, index) => ({
+          ...item,
+          zIndex: item.zIndex ?? index + 1,
+        }))
         quizQuestions.value = existing.quizQuestions ?? []
         for (const question of quizQuestions.value) {
           if (!canvasItems.value.some((item) => item.questionId === question.id)) {
@@ -592,8 +632,10 @@ onBeforeUnmount(() => {
               <button title="やり直す" :disabled="!editor?.can().redo()" @click="editor?.chain().focus().redo().run()"><Redo2 :size="17" /></button><span class="toolbar-separator"></span>
               <select aria-label="テキストスタイル" @change="(event) => { const val = (event.target as HTMLSelectElement).value; if (val === 'p') editor?.chain().focus().setParagraph().run(); else editor?.chain().focus().toggleHeading({ level: Number(val) as 1 | 2 | 3 }).run() }"><option value="p">本文</option><option value="1">見出し 1</option><option value="2">見出し 2</option><option value="3">見出し 3</option></select>
               <span class="toolbar-separator"></span>
-              <button title="太字" :class="{ selected: editor?.isActive('bold') }" @click="editor?.chain().focus().toggleBold().run()"><Bold :size="17" /></button>
-              <button title="斜体" :class="{ selected: editor?.isActive('italic') }" @click="editor?.chain().focus().toggleItalic().run()"><Italic :size="17" /></button>
+              <button title="太字" :class="{ selected: editor?.isActive('bold') }" @mousedown.prevent @click="editor?.chain().focus().toggleBold().run()"><Bold :size="17" /></button>
+              <button title="斜体" :class="{ selected: editor?.isActive('italic') }" @mousedown.prevent @click="editor?.chain().focus().toggleItalic().run()"><Italic :size="17" /></button>
+              <label class="text-style-control" title="本文の文字色"><span>文字色</span><input type="color" aria-label="本文の文字色" value="#46413c" @input="applyBodyTextStyle('color', $event)" /></label>
+              <label class="text-style-control" title="文字サイズ（px）"><span>文字サイズ</span><input type="number" min="1" max="200" value="16" aria-label="文字サイズ（ピクセル）" @change="applyBodyTextStyle('fontSize', $event)" /><span>px</span></label>
               <button title="箇条書き" :class="{ selected: editor?.isActive('bulletList') }" @click="editor?.chain().focus().toggleBulletList().run()"><List :size="17" /></button>
               <button title="番号付きリスト" :class="{ selected: editor?.isActive('orderedList') }" @click="editor?.chain().focus().toggleOrderedList().run()"><ListOrdered :size="17" /></button>
               <span class="toolbar-separator"></span>
@@ -630,24 +672,32 @@ onBeforeUnmount(() => {
               <button class="add-block-button" @click="editor?.chain().focus('end').insertContent('<p></p>').run()"><Plus :size="16" />ブロックを追加</button>
               <div class="editor-hint"><Sparkles :size="13" /> Enterで次の段落へ。文章を選択すると装飾メニューが使えます。</div>
               <div ref="canvasSurface" class="canvas-surface paper-canvas" @pointerdown.self="activeCanvasItemId = null">
-                <div v-for="item in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`, { selected: activeCanvasItemId === item.id }]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }" @pointerdown="selectCanvasItem(item, $event)">
+                <div v-for="(item, index) in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`, { selected: activeCanvasItemId === item.id }]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1 }" @pointerdown="selectCanvasItem(item, $event)">
                   <div v-if="activeCanvasItemId === item.id" class="canvas-item-header" @pointerdown.stop="startCanvasDrag(item, $event)">
                     <span title="ドラッグで位置を調整" aria-label="ドラッグで位置を調整">⠿</span>
                     <template v-if="item.type === 'shape'">
                       <select v-model="item.shape" aria-label="図形の種類" @pointerdown.stop>
                         <option value="rectangle">四角</option><option value="ellipse">円</option><option value="triangle">三角</option><option value="arrow">矢印</option><option value="line">線</option>
                       </select>
-                      <input :value="item.color || '#b96c50'" type="color" aria-label="図形の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop />
+                      <label title="枠線の色"><span>枠</span><input :value="item.color || '#b96c50'" type="color" aria-label="図形の枠線の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
+                      <label title="塗りつぶし"><span>塗り</span><input :value="item.fillColor || '#ffffff'" type="color" aria-label="図形の塗りつぶし色" @input="item.fillColor = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
+                      <label title="枠線の太さ"><span>太さ</span><input v-model.number="item.strokeWidth" type="number" min="0" max="30" aria-label="枠線の太さ" @pointerdown.stop /></label>
+                      <label title="角の丸さ"><span>角</span><input v-model.number="item.cornerRadius" type="number" min="0" max="100" aria-label="角の丸さ" @pointerdown.stop /></label>
                     </template>
+                    <template v-else-if="item.type === 'text' || item.type === 'quote' || item.type === 'code'">
+                      <label title="文字色"><span>文字</span><input :value="item.textColor || '#3a3430'" type="color" aria-label="テキストボックスの文字色" @input="item.textColor = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
+                      <label title="文字サイズ（px）"><span>サイズ</span><input v-model.number="item.fontSize" type="number" min="1" max="200" aria-label="テキストボックスの文字サイズ（ピクセル）" @pointerdown.stop /></label>
+                    </template>
+                    <label title="重なり順"><span>前後</span><input v-model.number="item.zIndex" type="number" step="1" aria-label="要素の重なり順" @pointerdown.stop /></label>
                     <button type="button" class="canvas-item-delete" @pointerdown.stop @click="deleteCanvasItem(item)">削除</button>
                   </div>
                   <textarea v-if="(item.type === 'text' || item.type === 'quote' || item.type === 'code' || item.type === 'image') && activeCanvasItemId === item.id" v-model="item.content" class="canvas-item-editor" :placeholder="item.type === 'code' ? 'コードを記述' : 'ここに内容を入力'" @pointerdown.stop></textarea>
-                  <div v-else-if="item.type === 'text' || item.type === 'quote'" class="canvas-markdown-preview" v-html="markdownToHtml(item.content)"></div>
-                  <pre v-else-if="item.type === 'code'" class="canvas-code-preview">{{ item.content }}</pre>
+                  <div v-else-if="item.type === 'text' || item.type === 'quote'" class="canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="markdownToHtml(item.content)"></div>
+                  <pre v-else-if="item.type === 'code'" class="canvas-code-preview" :style="{ color: item.textColor || '#efede5', fontSize: `${item.fontSize ?? 14}px` }">{{ item.content }}</pre>
                   <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
                   <div v-else-if="item.type === 'image'" class="canvas-image-placeholder">画像URLを設定</div>
-                  <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
-                    <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
+                  <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50', fill: item.fillColor || 'rgba(198,111,81,.08)', strokeWidth: item.strokeWidth ?? 2 }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
+                    <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" :rx="item.cornerRadius ?? 8" />
                     <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
                     <polygon v-else-if="item.shape === 'triangle'" points="80,10 148,88 12,88" />
                     <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
@@ -693,14 +743,14 @@ onBeforeUnmount(() => {
           <div class="paper-rule"></div>
           <div v-if="cover" class="reader-cover"><img :src="cover" alt="" /></div>
           <div class="reader-content" v-html="previewHtml()"></div>
-          <div class="preview-canvas">
-            <div v-for="item in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
-              <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown" v-html="markdownToHtml(item.content)"></div>
+          <div v-if="canvasItems.length" class="preview-canvas">
+            <div v-for="(item, index) in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
+              <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown canvas-markdown-preview" v-html="markdownToHtml(item.content)"></div>
               <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
               <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
               <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content || '画像' }}</div>
-              <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
-                <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
+              <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50', fill: item.fillColor || 'rgba(198,111,81,.08)', strokeWidth: item.strokeWidth ?? 2 }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
+                <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" :rx="item.cornerRadius ?? 8" />
                 <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
                 <polygon v-else-if="item.shape === 'triangle'" points="80,10 148,88 12,88" />
                 <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
@@ -712,10 +762,24 @@ onBeforeUnmount(() => {
               <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="reader-canvas-quiz">
                 <span>クイズ · {{ getQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>
                 <p>{{ getQuizQuestion(item)!.prompt || '問題文' }}</p>
-                <ul v-if="getQuizQuestion(item)!.type !== 'text'">
-                  <li v-for="(option, index) in getQuizQuestion(item)!.options" :key="index">{{ option || `選択肢 ${index + 1}` }}</li>
-                </ul>
-                <div v-else class="preview-short-answer">短答式の回答欄</div>
+                <div v-if="getQuizQuestion(item)!.type !== 'text'" class="quiz-options">
+                  <button
+                    v-for="(option, index) in getQuizQuestion(item)!.options"
+                    :key="index"
+                    :class="{ selected: getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === index, correct: getPreviewQuizResponse(getQuizQuestion(item)!).submitted && index === getQuizQuestion(item)!.answerIndex, wrong: getPreviewQuizResponse(getQuizQuestion(item)!).submitted && getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === index && index !== getQuizQuestion(item)!.answerIndex }"
+                    :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted"
+                    @click="getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex = index"
+                  >{{ option || `選択肢 ${index + 1}` }}</button>
+                </div>
+                <input v-else v-model="getPreviewQuizResponse(getQuizQuestion(item)!).text" class="quiz-answer-input" placeholder="回答を入力してください" :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted" />
+                <button class="button button-primary quiz-submit" :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted || (getQuizQuestion(item)!.type === 'text' ? !getPreviewQuizResponse(getQuizQuestion(item)!).text.trim() : getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === null)" @click="submitPreviewQuiz(getQuizQuestion(item)!)">
+                  {{ getPreviewQuizResponse(getQuizQuestion(item)!).submitted ? '提出済み' : '提出' }}
+                </button>
+                <div v-if="getPreviewQuizResponse(getQuizQuestion(item)!).submitted" class="quiz-feedback">
+                  <strong>{{ isPreviewQuizCorrect(getQuizQuestion(item)!) ? '正解です！' : '不正解です。' }}</strong>
+                  <span>答え：{{ getQuizQuestion(item)!.type === 'text' ? getQuizQuestion(item)!.answerText : getQuizQuestion(item)!.options[getQuizQuestion(item)!.answerIndex] }}</span>
+                  <span>{{ getQuizQuestion(item)!.explanation }}</span>
+                </div>
               </div>
             </div>
           </div>

@@ -11,6 +11,7 @@ import TableHeader from '@tiptap/extension-table-header'
 import TableCell from '@tiptap/extension-table-cell'
 import { getArticle, listArticles } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
+import { TextStyleMark } from '../lib/textStyle'
 import type { Article, CanvasItem, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
 
 const route = useRoute()
@@ -43,7 +44,7 @@ const quizQuestions = ref<QuizQuestion[]>([])
 const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
 
 const articleId = computed(() => String(route.params.slug))
-const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, Image, Table, TableRow, TableHeader, TableCell]) : '')
+const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, TextStyleMark, Image, Table, TableRow, TableHeader, TableCell]) : '')
 const articleCanvasItems = computed(() => {
   const items = [...(article.value?.canvas?.items ?? [])]
   const placedQuestions = new Set(items.map((item) => item.questionId).filter((id): id is string => Boolean(id)))
@@ -64,7 +65,7 @@ const articleCanvasItems = computed(() => {
   }
   return items
 })
-const articleCanvasHeight = computed(() => Math.max(340, ...articleCanvasItems.value.map((item) => item.y + item.h + 24)))
+const articleCanvasHeight = computed(() => Math.max(0, ...articleCanvasItems.value.map((item) => item.y + item.h + 24)))
 const publicQuizQuestions = computed(() => quizQuestions.value.filter((question) => {
   if (!question.prompt.trim()) return false
   if (question.type === 'text') return Boolean(question.answerText?.trim())
@@ -165,6 +166,14 @@ function submitQuiz(question: QuizQuestion) {
   if (!response) return
   response.submitted = true
 }
+
+function isQuizCorrect(question: QuizQuestion) {
+  const response = quizResponses.value[question.id]
+  if (!response) return false
+  return question.type === 'text'
+    ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
+    : response.selectedIndex === question.answerIndex
+}
 </script>
 
 <template>
@@ -210,13 +219,13 @@ function submitQuiz(question: QuizQuestion) {
 
       <div class="reader-content" v-html="contentHtml"></div>
       <div v-if="articleCanvasItems.length" class="reader-canvas">
-      <div v-for="item in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
-        <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown" v-html="markdownToHtml(item.content)"></div>
+      <div v-for="(item, index) in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
+        <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="markdownToHtml(item.content)"></div>
         <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
         <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
         <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content }}</div>
-        <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
-          <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
+        <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50', fill: item.fillColor || 'rgba(198,111,81,.08)', strokeWidth: item.strokeWidth ?? 2 }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
+          <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" :rx="item.cornerRadius ?? 8" />
           <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
           <polygon v-else-if="item.shape === 'triangle'" points="80,10 148,88 12,88" />
           <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
@@ -242,7 +251,7 @@ function submitQuiz(question: QuizQuestion) {
             {{ quizResponses[getPublicQuizQuestion(item)!.id]?.submitted ? '提出済み' : '提出' }}
           </button>
           <div v-if="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted" class="quiz-feedback">
-            <strong>{{ getPublicQuizQuestion(item)!.type === 'text' ? '回答を受け付けました' : quizResponses[getPublicQuizQuestion(item)!.id].selectedIndex === getPublicQuizQuestion(item)!.answerIndex ? '正解です！' : '不正解です。' }}</strong>
+            <strong>{{ isQuizCorrect(getPublicQuizQuestion(item)!) ? '正解です！' : '不正解です。' }}</strong>
             <span>答え：{{ getPublicQuizQuestion(item)!.type === 'text' ? getPublicQuizQuestion(item)!.answerText : getPublicQuizQuestion(item)!.options[getPublicQuizQuestion(item)!.answerIndex] }}</span>
             <span>{{ getPublicQuizQuestion(item)!.explanation }}</span>
           </div>

@@ -15,8 +15,14 @@ export interface CanvasItem {
   y: number
   w: number
   h: number
+  zIndex?: number
   content: string
   color?: string
+  fillColor?: string
+  strokeWidth?: number
+  cornerRadius?: number
+  textColor?: string
+  fontSize?: number
   shape?: 'rectangle' | 'ellipse' | 'triangle' | 'arrow' | 'line'
   strokes?: Array<Array<{ x: number; y: number }>>
   questionId?: string
