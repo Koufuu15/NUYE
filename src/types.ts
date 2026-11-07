@@ -8,6 +8,53 @@ export interface ArticleBlock {
   layout: Record<string, unknown>
 }
 
+export interface CanvasItem {
+  id: string
+  type: 'text' | 'quote' | 'image' | 'code' | 'shape' | 'drawing'
+  x: number
+  y: number
+  w: number
+  h: number
+  content: string
+  color?: string
+  shape?: 'rectangle' | 'ellipse' | 'triangle' | 'arrow' | 'line'
+  strokes?: Array<Array<{ x: number; y: number }>>
+}
+
+export interface ArticleCanvas {
+  mode: 'block' | 'canvas'
+  items: CanvasItem[]
+}
+
+export interface RevisionEntry {
+  id: string
+  title: string
+  createdAt: string
+  summary: string
+}
+
+export interface GlossaryEntry {
+  term: string
+  definition: string
+}
+
+export interface CommentEntry {
+  id: string
+  author: string
+  body: string
+  createdAt: string
+}
+
+export interface QuizQuestion {
+  id: string
+  prompt: string
+  options: string[]
+  answerIndex: number
+  explanation: string
+  type?: 'choice' | 'text'
+  answerText?: string
+}
+
 export interface Article {
   id: string
   slug: string
@@ -21,6 +68,8 @@ export interface Article {
   updatedAt: string
   publishedAt?: string
   authorId?: string
+  canvas?: ArticleCanvas
+  revisions?: RevisionEntry[]
 }
 
 export interface AuthUser {

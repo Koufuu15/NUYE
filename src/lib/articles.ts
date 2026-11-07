@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Article, ArticleBlock, AuthUser } from '../types'
+import type { Article, ArticleBlock, ArticleCanvas, AuthUser } from '../types'
 
 const STORAGE_KEY = 'mangapress.articles.v1'
 const SESSION_KEY = 'mangapress.local-user.v1'
@@ -48,6 +48,7 @@ function writeLocal(articles: Article[]) {
 }
 
 function toArticle(row: Record<string, unknown>, tags: string[] = []): Article {
+  const contentJson = (row.content_json as Record<string, unknown>) ?? { type: 'doc', content: [] }
   return {
     id: String(row.id),
     slug: String(row.slug ?? row.id),
@@ -56,11 +57,12 @@ function toArticle(row: Record<string, unknown>, tags: string[] = []): Article {
     category: String(row.category ?? 'テクノロジー'),
     tags,
     cover: String(row.cover_url ?? ''),
-    content: (row.content_json as Record<string, unknown>) ?? { type: 'doc', content: [] },
+    content: contentJson,
     status: row.status === 'published' ? 'published' : 'draft',
     updatedAt: String(row.updated_at ?? new Date().toISOString()),
     publishedAt: row.published_at ? String(row.published_at) : undefined,
     authorId: row.user_id ? String(row.user_id) : undefined,
+    canvas: (contentJson.canvas as ArticleCanvas) ?? { mode: 'block', items: [] },
   }
 }
 
@@ -106,7 +108,9 @@ export async function getArticle(idOrSlug: string): Promise<Article | undefined>
 
 export async function saveArticle(article: Article): Promise<Article> {
   const now = new Date().toISOString()
-  const next = { ...article, updatedAt: now }
+  const canvas = article.canvas ?? ((article.content as Record<string, unknown>)?.canvas as ArticleCanvas | undefined) ?? { mode: 'block', items: [] }
+  const normalizedContent = { ...(article.content ?? {}), canvas }
+  const next = { ...article, content: normalizedContent, canvas, updatedAt: now }
   if (!supabase) {
     const articles = readLocal()
     const index = articles.findIndex((item) => item.id === article.id)
@@ -125,7 +129,7 @@ export async function saveArticle(article: Article): Promise<Article> {
     summary: article.summary,
     category: article.category,
     cover_url: article.cover,
-    content_json: article.content,
+    content_json: normalizedContent,
     status: article.status,
     updated_at: now,
     published_at: article.status === 'published' ? (article.publishedAt ?? now) : null,
