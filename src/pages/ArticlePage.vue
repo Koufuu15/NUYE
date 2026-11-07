@@ -5,13 +5,11 @@ import { ArrowLeft, Bookmark, Heart, MessageCircle, Share2 } from 'lucide-vue-ne
 import { generateHTML } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
-import Table from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
-import TableHeader from '@tiptap/extension-table-header'
-import TableCell from '@tiptap/extension-table-cell'
 import { getArticle, listArticles } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
-import { TextStyleMark } from '../lib/textStyle'
+import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
+import { TextStyleMark, UnderlineMark } from '../lib/textStyle'
 import type { Article, CanvasItem, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
 
 const route = useRoute()
@@ -44,7 +42,7 @@ const quizQuestions = ref<QuizQuestion[]>([])
 const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
 
 const articleId = computed(() => String(route.params.slug))
-const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, TextStyleMark, Image, Table, TableRow, TableHeader, TableCell]) : '')
+const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '')
 const articleCanvasItems = computed(() => {
   const items = [...(article.value?.canvas?.items ?? [])]
   const placedQuestions = new Set(items.map((item) => item.questionId).filter((id): id is string => Boolean(id)))
@@ -65,7 +63,21 @@ const articleCanvasItems = computed(() => {
   }
   return items
 })
-const articleCanvasHeight = computed(() => Math.max(0, ...articleCanvasItems.value.map((item) => item.y + item.h + 24)))
+const articleCanvasHeight = computed(() => Math.max(
+  article.value?.canvas?.body ? article.value.canvas.body.y + article.value.canvas.body.h + 58 : 0,
+  ...articleCanvasItems.value.map((item) => item.y + item.h + 24),
+))
+const articleBodyStyle = computed(() => {
+  const body = article.value?.canvas?.body
+  return body ? {
+    position: 'absolute' as const,
+    left: `${body.x}px`,
+    top: `${body.y}px`,
+    width: `${body.w}px`,
+    minHeight: `${body.h}px`,
+    padding: '0',
+  } : undefined
+})
 const publicQuizQuestions = computed(() => quizQuestions.value.filter((question) => {
   if (!question.prompt.trim()) return false
   if (question.type === 'text') return Boolean(question.answerText?.trim())
@@ -78,6 +90,12 @@ const summaryText = computed(() => article.value ? `この記事の要点: ${art
 function getPublicQuizQuestion(item: CanvasItem) {
   const question = quizQuestions.value.find((entry) => entry.id === item.questionId)
   return question && publicQuizQuestions.value.includes(question) ? question : undefined
+}
+
+function getCanvasTextHtml(item: CanvasItem) {
+  return item.richContent
+    ? generateHTML(item.richContent, [StarterKit, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+    : markdownToHtml(item.content)
 }
 
 onMounted(async () => {
@@ -217,10 +235,10 @@ function isQuizCorrect(question: QuizQuestion) {
         <p class="summary-note">{{ summaryText }}</p>
       </details>
 
-      <div class="reader-content" v-html="contentHtml"></div>
+      <div class="reader-content" :style="articleBodyStyle" v-html="contentHtml"></div>
       <div v-if="articleCanvasItems.length" class="reader-canvas">
       <div v-for="(item, index) in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-        <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="markdownToHtml(item.content)"></div>
+        <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="getCanvasTextHtml(item)"></div>
         <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
         <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
         <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content }}</div>

@@ -1,3 +1,5 @@
+import type { JSONContent } from '@tiptap/core'
+
 export type ArticleStatus = 'draft' | 'published'
 
 export interface ArticleBlock {
@@ -17,6 +19,7 @@ export interface CanvasItem {
   h: number
   zIndex?: number
   content: string
+  richContent?: JSONContent
   color?: string
   fillColor?: string
   strokeWidth?: number
@@ -31,6 +34,7 @@ export interface CanvasItem {
 export interface ArticleCanvas {
   mode: 'block' | 'canvas'
   items: CanvasItem[]
+  body?: { x: number; y: number; w: number; h: number }
 }
 
 export interface RevisionEntry {
