@@ -69,6 +69,8 @@ export interface Article {
   publishedAt?: string
   authorId?: string
   canvas?: ArticleCanvas
+  quizQuestions?: QuizQuestion[]
+  autoSummaryEnabled?: boolean
   revisions?: RevisionEntry[]
 }
 

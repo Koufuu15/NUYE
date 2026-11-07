@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { Article, ArticleBlock, ArticleCanvas, AuthUser } from '../types'
+import type { Article, ArticleBlock, ArticleCanvas, AuthUser, QuizQuestion } from '../types'
 
 const STORAGE_KEY = 'mangapress.articles.v1'
 const SESSION_KEY = 'mangapress.local-user.v1'
@@ -63,6 +63,8 @@ function toArticle(row: Record<string, unknown>, tags: string[] = []): Article {
     publishedAt: row.published_at ? String(row.published_at) : undefined,
     authorId: row.user_id ? String(row.user_id) : undefined,
     canvas: (contentJson.canvas as ArticleCanvas) ?? { mode: 'block', items: [] },
+    quizQuestions: Array.isArray(contentJson.quizQuestions) ? contentJson.quizQuestions as QuizQuestion[] : [],
+    autoSummaryEnabled: typeof contentJson.autoSummaryEnabled === 'boolean' ? contentJson.autoSummaryEnabled : true,
   }
 }
 
@@ -109,7 +111,12 @@ export async function getArticle(idOrSlug: string): Promise<Article | undefined>
 export async function saveArticle(article: Article): Promise<Article> {
   const now = new Date().toISOString()
   const canvas = article.canvas ?? ((article.content as Record<string, unknown>)?.canvas as ArticleCanvas | undefined) ?? { mode: 'block', items: [] }
-  const normalizedContent = { ...(article.content ?? {}), canvas }
+  const normalizedContent = {
+    ...(article.content ?? {}),
+    canvas,
+    quizQuestions: article.quizQuestions ?? [],
+    autoSummaryEnabled: article.autoSummaryEnabled ?? true,
+  }
   const next = { ...article, content: normalizedContent, canvas, updatedAt: now }
   if (!supabase) {
     const articles = readLocal()

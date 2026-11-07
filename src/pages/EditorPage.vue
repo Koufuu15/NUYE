@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
+import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { Blockquote } from '@tiptap/extension-blockquote'
 import Image from '@tiptap/extension-image'
 import Table from '@tiptap/extension-table'
@@ -17,7 +18,7 @@ import {
 } from 'lucide-vue-next'
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
-import type { Article, CanvasItem } from '../types'
+import type { Article, CanvasItem, QuizQuestion } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +29,7 @@ const summary = ref('')
 const category = ref('テクノロジー')
 const tagsInput = ref('')
 const cover = ref('')
+const autoSummaryEnabled = ref(true)
 const authorId = ref<string>()
 const preview = ref(false)
 const saving = ref(false)
@@ -39,6 +41,10 @@ const fileInput = ref<HTMLInputElement>()
 const coverInput = ref<HTMLInputElement>()
 const canvasItems = ref<CanvasItem[]>([])
 const canvasSurface = ref<HTMLElement>()
+const paperSheet = ref<HTMLElement>()
+const hoveredBlock = ref<{ top: number; left: number; index: number } | null>(null)
+const blockDragState = ref<{ index: number } | null>(null)
+const quizQuestions = ref<QuizQuestion[]>([])
 const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(null)
 const activeDrawingId = ref<string | null>(null)
 let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -53,15 +59,20 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
     drawing: { w: 240, h: 160, content: '', },
   }
   const base = presets[type]
+  const paperRect = paperSheet.value?.getBoundingClientRect()
+  const contentRect = editor.value?.view.dom.getBoundingClientRect()
+  const defaultY = paperRect && contentRect
+    ? Math.max(260, contentRect.bottom - paperRect.top + 24) + canvasItems.value.length * 22
+    : 260 + canvasItems.value.length * 42
   return {
     id: crypto.randomUUID(),
     type,
     x: overrides.x ?? 24 + (canvasItems.value.length % 4) * 55,
-    y: overrides.y ?? 28 + (canvasItems.value.length % 5) * 42,
+    y: overrides.y ?? defaultY,
     w: overrides.w ?? base.w,
     h: overrides.h ?? base.h,
     content: overrides.content ?? base.content,
-    color: overrides.color,
+    color: overrides.color ?? (type === 'shape' ? '#b96c50' : undefined),
     shape: overrides.shape,
     strokes: overrides.strokes ?? (type === 'drawing' ? [] : undefined),
   }
@@ -78,6 +89,7 @@ function addCanvasItem(type: CanvasItem['type'], shape?: CanvasItem['shape']) {
 }
 
 function handlePointerMove(event: PointerEvent) {
+  if (blockDragState.value) return
   if (activeDrawingId.value) {
     const item = canvasItems.value.find((entry) => entry.id === activeDrawingId.value)
     const svg = document.querySelector<SVGSVGElement>(`[data-drawing-id="${activeDrawingId.value}"]`)
@@ -98,9 +110,82 @@ function handlePointerMove(event: PointerEvent) {
   item.y = nextY
 }
 
-function stopPointerDrag() {
+function stopPointerDrag(event?: MouseEvent) {
+  if (blockDragState.value && event) finishBlockDrag(event)
+  blockDragState.value = null
   dragState.value = null
   activeDrawingId.value = null
+}
+
+function getEditorBlocks() {
+  const editorDom = editor.value?.view.dom
+  return editorDom
+    ? Array.from(editorDom.children).filter((child) => !child.classList.contains('ProseMirror-widget'))
+    : []
+}
+
+function updateBlockHandle(event: PointerEvent) {
+  if (blockDragState.value || !paperSheet.value) return
+  const target = event.target
+  if (!(target instanceof Element) || target.closest('.block-drag-handle')) return
+  const block = target.closest('.tiptap-editor > *')
+  const editorDom = editor.value?.view.dom
+  const paperRect = paperSheet.value.getBoundingClientRect()
+  if (!block || !editorDom?.contains(block)) {
+    hoveredBlock.value = null
+    return
+  }
+  const rect = block.getBoundingClientRect()
+  const index = getEditorBlocks().indexOf(block)
+  if (index < 0) {
+    hoveredBlock.value = null
+    return
+  }
+  hoveredBlock.value = {
+    left: Math.max(2, rect.left - paperRect.left - 27),
+    top: rect.top - paperRect.top + 2,
+    index,
+  }
+}
+
+function startBlockDrag(event: PointerEvent) {
+  const index = hoveredBlock.value?.index
+  if (index === undefined || index >= (editor.value?.state.doc.childCount ?? 0)) return
+  blockDragState.value = { index }
+  event.preventDefault()
+}
+
+function finishBlockDrag(event: MouseEvent) {
+  const state = blockDragState.value
+  const editorInstance = editor.value
+  if (!state || !editorInstance) return
+  const editorDom = editorInstance.view.dom
+  const blocks = getEditorBlocks()
+  const target = blocks.find((block) => {
+    const rect = block.getBoundingClientRect()
+    return event.clientY >= rect.top && event.clientY <= rect.bottom
+  }) ?? blocks.reduce< Element | null>((nearest, block) => {
+    if (!nearest) return block
+    const rect = block.getBoundingClientRect()
+    const nearestRect = nearest.getBoundingClientRect()
+    const distance = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom)
+    const nearestDistance = Math.max(nearestRect.top - event.clientY, 0, event.clientY - nearestRect.bottom)
+    return distance < nearestDistance ? block : nearest
+  }, null)
+  if (!target) return
+  const targetIndex = blocks.indexOf(target)
+  const targetRect = target.getBoundingClientRect()
+  const insertIndex = targetIndex + (event.clientY > targetRect.top + targetRect.height / 2 ? 1 : 0)
+  if (insertIndex === state.index || insertIndex === state.index + 1) return
+
+  const doc = editorInstance.state.doc
+  const nodes: ProseMirrorNode[] = []
+  doc.forEach((node) => nodes.push(node))
+  const movedNode = nodes.splice(state.index, 1)[0]
+  if (!movedNode) return
+  nodes.splice(insertIndex > state.index ? insertIndex - 1 : insertIndex, 0, movedNode)
+  const transaction = editorInstance.state.tr.replaceWith(0, doc.content.size, Fragment.fromArray(nodes))
+  editorInstance.view.dispatch(transaction)
 }
 
 function startCanvasDrag(item: CanvasItem, event: PointerEvent) {
@@ -111,6 +196,23 @@ function startCanvasDrag(item: CanvasItem, event: PointerEvent) {
     offsetX: event.clientX - rect.left - item.x,
     offsetY: event.clientY - rect.top - item.y,
   }
+}
+
+function createQuizQuestion(): QuizQuestion {
+  return {
+    id: crypto.randomUUID(),
+    type: 'choice',
+    prompt: '',
+    options: ['', '', '', ''],
+    answerIndex: 0,
+    answerText: '',
+    explanation: '',
+  }
+}
+
+function addQuizQuestion() {
+  quizQuestions.value.push(createQuizQuestion())
+  scheduleSave()
 }
 
 function getDrawingPoint(svg: SVGSVGElement, event: PointerEvent) {
@@ -179,10 +281,12 @@ const editor = useEditor({
 })
 
 const tags = computed(() => tagsInput.value.split(',').map((tag) => tag.trim()).filter(Boolean))
+const paperSheetHeight = computed(() => Math.max(0, ...canvasItems.value.map((item) => item.y + item.h + 58)))
 
 onMounted(async () => {
   window.addEventListener('pointermove', handlePointerMove)
   window.addEventListener('pointerup', stopPointerDrag)
+  window.addEventListener('mouseup', stopPointerDrag)
   try {
     authorId.value = (await getCurrentUser())?.id ?? 'local-user'
     if (!isNew.value) {
@@ -195,6 +299,8 @@ onMounted(async () => {
         cover.value = existing.cover
         authorId.value = existing.authorId ?? authorId.value
         canvasItems.value = existing.canvas?.items ?? []
+        quizQuestions.value = existing.quizQuestions ?? []
+        autoSummaryEnabled.value = existing.autoSummaryEnabled ?? true
         editor.value?.commands.setContent(existing.content as JSONContent)
       } else {
         saveError.value = '記事が見つかりません。新しい記事として作成します。'
@@ -221,10 +327,13 @@ onMounted(async () => {
   ready.value = true
 })
 
-watch([title, summary, category, tagsInput, cover], () => {
+watch([title, summary, category, tagsInput, cover, autoSummaryEnabled], () => {
   if (ready.value) scheduleSave()
 })
 watch(canvasItems, () => {
+  if (ready.value) scheduleSave()
+}, { deep: true })
+watch(quizQuestions, () => {
   if (ready.value) scheduleSave()
 }, { deep: true })
 function currentArticle(status: Article['status']): Article {
@@ -240,12 +349,19 @@ function currentArticle(status: Article['status']): Article {
     category: category.value,
     tags: tags.value,
     cover: cover.value,
-    content: { ...(content as Record<string, unknown>), canvas },
+    content: {
+      ...(content as Record<string, unknown>),
+      canvas,
+      quizQuestions: quizQuestions.value,
+      autoSummaryEnabled: autoSummaryEnabled.value,
+    },
     status,
     updatedAt: new Date().toISOString(),
     publishedAt,
     authorId: authorId.value,
     canvas,
+    quizQuestions: quizQuestions.value,
+    autoSummaryEnabled: autoSummaryEnabled.value,
   }
 }
 
@@ -335,10 +451,6 @@ function insertSpeechBubble() {
   editor.value?.chain().focus().insertContent('<blockquote data-kind="speech"><p>💬 ここに吹き出しの内容を書いてください。</p></blockquote><p></p>').run()
 }
 
-function insertQuiz() {
-  editor.value?.chain().focus().insertContent('<blockquote data-kind="quiz"><p>✳ ミニクイズ</p><p>ここに質問を書いて、次の行に答えを追加しましょう。</p></blockquote><p></p>').run()
-}
-
 function addTable() {
   editor.value?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
 }
@@ -360,6 +472,7 @@ onBeforeUnmount(() => {
   if (saveTimer) clearTimeout(saveTimer)
   window.removeEventListener('pointermove', handlePointerMove)
   window.removeEventListener('pointerup', stopPointerDrag)
+  window.removeEventListener('mouseup', stopPointerDrag)
   editor.value?.destroy()
 })
 </script>
@@ -375,7 +488,11 @@ onBeforeUnmount(() => {
     <div class="editor-workspace">
       <aside class="editor-sidebar">
         <div class="sidebar-heading"><span>記事の設定</span><button aria-label="設定を折りたたむ"><ChevronDown :size="15" /></button></div>
-        <div class="editor-auto-meta"><Sparkles :size="14" /><span>タイトルと概要は本文から自動で設定されます。</span></div>
+        <label class="summary-setting">
+          <input v-model="autoSummaryEnabled" type="checkbox" />
+          <span><Sparkles :size="14" /><b>AIによる自動概要作成</b></span>
+          <small>{{ autoSummaryEnabled ? '有効' : '無効' }}</small>
+        </label>
         <label class="field-label" for="article-category">カテゴリ</label>
         <select id="article-category" v-model="category" class="sidebar-select"><option>テクノロジー</option><option>プログラミング</option><option>デザイン</option><option>AI</option><option>お知らせ</option></select>
         <label class="field-label" for="article-tags">タグ <small>カンマ区切り</small></label>
@@ -386,6 +503,25 @@ onBeforeUnmount(() => {
         <button class="cover-upload" @click="coverInput?.click()"><img v-if="cover" :src="cover" alt="カバー画像" /><template v-else><ImagePlus :size="18" /><span>画像を追加</span><small>5MBまで</small></template></button>
         <input ref="coverInput" type="file" accept="image/*" class="hidden" @change="setCoverImage" />
         <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="insertImage" />
+        <div class="side-separator"></div>
+        <div class="quiz-editor-heading"><strong>クイズ</strong><button type="button" @click="addQuizQuestion"><Plus :size="13" />問題を追加</button></div>
+        <div v-for="(question, questionIndex) in quizQuestions" :key="question.id" class="quiz-editor-card">
+          <div class="quiz-editor-card-heading"><span>問題 {{ questionIndex + 1 }}</span><button type="button" @click="quizQuestions.splice(questionIndex, 1)">削除</button></div>
+          <select v-model="question.type" class="sidebar-select" aria-label="回答形式">
+            <option value="choice">選択肢式</option>
+            <option value="text">短答式</option>
+          </select>
+          <textarea v-model="question.prompt" class="sidebar-textarea quiz-editor-prompt" rows="2" placeholder="問題文を入力"></textarea>
+          <template v-if="question.type === 'choice'">
+            <label v-for="(option, optionIndex) in question.options" :key="optionIndex" class="quiz-option-editor">
+              <input v-model="question.answerIndex" type="radio" :name="`answer-${question.id}`" :value="optionIndex" :aria-label="`選択肢${optionIndex + 1}を正解にする`" />
+              <input v-model="question.options[optionIndex]" class="sidebar-input" :placeholder="`選択肢 ${optionIndex + 1}`" />
+            </label>
+            <button type="button" class="quiz-add-option" @click="question.options.push('')">選択肢を追加</button>
+          </template>
+          <input v-else v-model="question.answerText" class="sidebar-input quiz-short-answer" placeholder="答えを入力" />
+          <input v-model="question.explanation" class="sidebar-input quiz-explanation" placeholder="解説（任意）" />
+        </div>
         <div class="side-separator"></div>
         <div class="editor-sidebar-bottom"><button @click="saveDraft" class="side-save"><Save :size="15" />下書きとして保存</button><span>画像はブラウザ内に保存されます</span></div>
       </aside>
@@ -406,55 +542,59 @@ onBeforeUnmount(() => {
               <button title="コードブロック" @click="editor?.chain().focus().toggleCodeBlock().run()"><Code2 :size="17" /></button>
               <button title="表を追加" @click="addTable"><Table2 :size="17" /></button>
               <button title="吹き出しを追加" @click="insertSpeechBubble"><span class="bubble-tool">•••</span></button>
-              <button title="クイズを追加" @click="insertQuiz"><Sparkles :size="16" /></button>
+              <button title="クイズを追加" @click="addQuizQuestion"><Sparkles :size="16" /></button>
               <button title="画像を追加" @click="fileInput?.click()"><ImagePlus :size="17" /></button>
             </div>
           </div>
-          <div class="positioned-block-tools">
-            <span>配置ブロック</span>
-            <button @click="addCanvasItem('text')"><Plus :size="13" />テキスト / Markdown</button>
+          <div class="sheet-item-tools">
+            <span>シートに追加</span>
+            <button @click="addCanvasItem('text')"><Plus :size="13" />テキスト</button>
             <button @click="addCanvasItem('shape', 'rectangle')">四角</button>
             <button @click="addCanvasItem('shape', 'ellipse')">円</button>
             <button @click="addCanvasItem('shape', 'triangle')">三角</button>
             <button @click="addCanvasItem('shape', 'arrow')">矢印</button>
             <button @click="addCanvasItem('shape', 'line')">線</button>
             <button @click="addCanvasItem('drawing')"><Plus :size="13" />手書き</button>
+            <button @click="addCanvasItem('quote')">吹き出し</button>
           </div>
           <div class="canvas-scroll">
-            <div v-if="!preview" class="paper-sheet">
+            <div v-if="!preview" ref="paperSheet" class="paper-sheet" :style="{ '--paper-content-height': `${paperSheetHeight}px` }" @pointermove="updateBlockHandle" @pointerleave="hoveredBlock = null">
               <div class="paper-meta"><span class="paper-category">{{ category }}</span><span>·</span><span>約{{ Math.max(1, Math.ceil((editor?.getText().length ?? 0) / 400)) }}分で読めます</span></div>
               <h1 class="paper-title">{{ getCanvasTitle() }}</h1>
               <div v-if="getCanvasSummary()" class="paper-summary">{{ getCanvasSummary() }}</div>
               <div class="paper-author"><span class="avatar avatar-tiny">M</span><span>あなた</span><span class="paper-date">下書き</span></div>
               <div class="paper-rule"></div>
               <EditorContent v-if="editor" :editor="editor" />
+              <div v-if="hoveredBlock" class="block-drag-handle" :style="{ left: `${hoveredBlock.left}px`, top: `${hoveredBlock.top}px` }" title="ドラッグしてブロックを移動" aria-label="ブロックをドラッグして移動" @pointerdown.prevent.stop="startBlockDrag" @dragstart.prevent>
+                <span>⠿</span>
+              </div>
               <button class="add-block-button" @click="editor?.chain().focus('end').insertContent('<p></p>').run()"><Plus :size="16" />ブロックを追加</button>
               <div class="editor-hint"><Sparkles :size="13" /> Enterで次の段落へ。文章を選択すると装飾メニューが使えます。</div>
-            </div>
-            <section class="positioned-block-section">
-              <div class="positioned-block-heading"><div><strong>自由配置ブロック</strong><small>要素の見出しをドラッグして移動。本文ブロックと同じ記事内で使えます。</small></div></div>
-              <div ref="canvasSurface" class="canvas-surface positioned-block-surface">
+              <div ref="canvasSurface" class="canvas-surface paper-canvas">
                 <div v-for="item in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
                   <div class="canvas-item-header" @pointerdown="startCanvasDrag(item, $event)">
-                    <span>{{ item.type === 'text' ? 'テキスト · Markdown' : item.type === 'quote' ? '吹き出し' : item.type === 'code' ? 'コード' : item.type === 'shape' ? `図形 · ${item.shape}` : item.type === 'drawing' ? '手書きボックス' : '画像' }}</span>
+                    <span>{{ item.type === 'text' ? 'テキスト · Markdown' : item.type === 'quote' ? '吹き出し' : item.type === 'code' ? 'コード' : item.type === 'shape' ? `図形 · ${item.shape}` : item.type === 'drawing' ? '手書き' : '画像' }}</span>
+                    <select v-if="item.type === 'shape'" v-model="item.shape" aria-label="図形の種類" @pointerdown.stop>
+                      <option value="rectangle">四角</option><option value="ellipse">円</option><option value="triangle">三角</option><option value="arrow">矢印</option><option value="line">線</option>
+                    </select>
+                    <input v-if="item.type === 'shape'" :value="item.color || '#b96c50'" type="color" aria-label="図形の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop />
                     <button type="button" class="canvas-item-delete" @pointerdown.stop @click="canvasItems = canvasItems.filter((entry) => entry.id !== item.id); scheduleSave()">削除</button>
                   </div>
                   <textarea v-if="item.type === 'text' || item.type === 'quote' || item.type === 'code' || item.type === 'image'" v-model="item.content" class="canvas-item-editor" :placeholder="item.type === 'code' ? 'コードを記述' : 'ここに内容を入力'" @pointerdown.stop></textarea>
                   <div v-if="item.type === 'text'" class="canvas-markdown-preview" v-html="markdownToHtml(item.content)"></div>
-                  <svg v-else-if="item.type === 'shape'" class="canvas-shape" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
+                  <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
                     <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
                     <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
                     <polygon v-else-if="item.shape === 'triangle'" points="80,10 148,88 12,88" />
                     <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
                     <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
                   </svg>
-                  <svg v-else class="canvas-drawing" :data-drawing-id="item.id" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス" @pointerdown="startDrawing(item, $event)">
+                  <svg v-else-if="item.type === 'drawing'" class="canvas-drawing" :data-drawing-id="item.id" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス" @pointerdown="startDrawing(item, $event)">
                     <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
                   </svg>
                 </div>
-                <div v-if="!canvasItems.length" class="canvas-empty">上のボタンからテキスト・図形・手書きボックスを追加できます。</div>
               </div>
-            </section>
+            </div>
           </div>
           <div class="editor-bottom-bar"><span><span class="green-dot"></span>自動保存オン</span><span>{{ editor?.getText().length ?? 0 }} 文字</span><span class="bottom-spacer"></span><button @click="editor?.chain().focus().setParagraph().run()">標準</button><span class="zoom-label">100%</span></div>
       </section>
