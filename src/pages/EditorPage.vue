@@ -41,6 +41,7 @@ const coverInput = ref<HTMLInputElement>()
 const canvasItems = ref<CanvasItem[]>([])
 const canvasSurface = ref<HTMLElement>()
 const paperSheet = ref<HTMLElement>()
+const paperScale = ref(1)
 const activeCanvasItemId = ref<string | null>(null)
 const activeCanvasTextEditor = shallowRef<Editor | null>(null)
 const selectedTableEditor = shallowRef<Editor | null>(null)
@@ -53,6 +54,7 @@ const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(n
 const resizeState = ref<{ id: string; corner: string; startX: number; startY: number; x: number; y: number; w: number; h: number } | null>(null)
 const activeDrawingId = ref<string | null>(null)
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let paperResizeObserver: ResizeObserver | undefined
 const bodyCanvasId = 'article-body-canvas'
 let selectedTableWrapper: HTMLElement | null = null
 
@@ -60,6 +62,7 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
   const presets: Record<CanvasItem['type'], { w: number; h: number; content: string }> = {
     text: { w: 240, h: 160, content: '## 要点\nここに文章を入力します。**Markdown** に対応しています。' },
     quote: { w: 240, h: 120, content: '大切なメッセージを、読者がすぐ見える位置に置きましょう。' },
+    table: { w: 320, h: 180, content: '' },
     image: { w: 260, h: 150, content: '画像要素はブロック編集から追加できます。' },
     code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
     shape: { w: 160, h: 110, content: '' },
@@ -70,7 +73,7 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
   const paperRect = paperSheet.value?.getBoundingClientRect()
   const contentRect = editor.value?.view.dom.getBoundingClientRect()
   const defaultY = paperRect && contentRect
-    ? Math.max(260, contentRect.bottom - paperRect.top + 24) + canvasItems.value.length * 22
+    ? Math.max(260, (contentRect.bottom - paperRect.top) / paperScale.value + 24) + canvasItems.value.length * 22
     : 260 + canvasItems.value.length * 42
   const defaultZIndex = Math.max(0, ...canvasItems.value.map((item) => item.zIndex ?? 0)) + 1
   return {
@@ -109,8 +112,8 @@ function handlePointerMove(event: PointerEvent) {
     const state = resizeState.value
     const item = state.id === bodyCanvasId ? bodyCanvasPosition.value : canvasItems.value.find((entry) => entry.id === state.id)
     if (!item) return
-    const dx = event.clientX - state.startX
-    const dy = event.clientY - state.startY
+    const dx = (event.clientX - state.startX) / paperScale.value
+    const dy = (event.clientY - state.startY) / paperScale.value
     const east = state.corner.includes('e')
     const south = state.corner.includes('s')
     const west = state.corner.includes('w')
@@ -138,8 +141,8 @@ function handlePointerMove(event: PointerEvent) {
     ? bodyCanvasPosition.value
     : canvasItems.value.find((entry) => entry.id === dragState.value?.id)
   if (!item) return
-  const nextX = clamp(event.clientX - rect.left - dragState.value.offsetX, 14, Math.max(14, rect.width - item.w - 14))
-  const nextY = clamp(event.clientY - rect.top - dragState.value.offsetY, 14, Math.max(14, rect.height - item.h - 14))
+  const nextX = clamp((event.clientX - rect.left) / paperScale.value - dragState.value.offsetX, 14, Math.max(14, rect.width / paperScale.value - item.w - 14))
+  const nextY = clamp((event.clientY - rect.top) / paperScale.value - dragState.value.offsetY, 14, Math.max(14, rect.height / paperScale.value - item.h - 14))
   item.x = nextX
   item.y = nextY
 }
@@ -182,8 +185,8 @@ function startCanvasDrag(item: CanvasItem, event: PointerEvent) {
   activeCanvasItemId.value = item.id
   dragState.value = {
     id: item.id,
-    offsetX: event.clientX - rect.left - item.x,
-    offsetY: event.clientY - rect.top - item.y,
+    offsetX: (event.clientX - rect.left) / paperScale.value - item.x,
+    offsetY: (event.clientY - rect.top) / paperScale.value - item.y,
   }
   event.preventDefault()
 }
@@ -197,8 +200,8 @@ function startBodyCanvasDrag(event: PointerEvent) {
   if (!rect) return
   dragState.value = {
     id: bodyCanvasId,
-    offsetX: event.clientX - rect.left - bodyCanvasPosition.value.x,
-    offsetY: event.clientY - rect.top - bodyCanvasPosition.value.y,
+    offsetX: (event.clientX - rect.left) / paperScale.value - bodyCanvasPosition.value.x,
+    offsetY: (event.clientY - rect.top) / paperScale.value - bodyCanvasPosition.value.y,
   }
 }
 
@@ -263,14 +266,14 @@ function showTableMenu(wrapper: HTMLElement, currentEditor?: Editor, paperRect =
   if (currentEditor) selectedTableEditor.value = currentEditor
   const rect = wrapper.getBoundingClientRect()
   tableMenuPosition.value = {
-    left: clamp(rect.left - paperRect.left, 8, Math.max(8, paperRect.width - 290)),
-    top: clamp(rect.bottom - paperRect.top + 8, 8, Math.max(8, paperRect.height - 44)),
+    left: clamp((rect.left - paperRect.left) / paperScale.value, 8, Math.max(8, paperRect.width / paperScale.value - 290)),
+    top: clamp((rect.bottom - paperRect.top) / paperScale.value + 8, 8, Math.max(8, paperRect.height / paperScale.value - 44)),
   }
   tableOutlinePosition.value = {
-    left: rect.left - paperRect.left - 4,
-    top: rect.top - paperRect.top - 4,
-    width: rect.width + 8,
-    height: rect.height + 8,
+    left: (rect.left - paperRect.left) / paperScale.value - 4,
+    top: (rect.top - paperRect.top) / paperScale.value - 4,
+    width: rect.width / paperScale.value + 8,
+    height: rect.height / paperScale.value + 8,
   }
 }
 
@@ -437,15 +440,19 @@ const editor = useEditor({
   ],
   editorProps: {
     attributes: {
-      class: 'canvas-item-editor canvas-body-editor',
+      class: 'canvas-body-editor',
       'aria-label': '記事本文',
     },
   },
   onFocus: activateBodyEditor,
+  onCreate: ({ editor: currentEditor }) => {
+    currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty)
+  },
   onSelectionUpdate: ({ editor: currentEditor }) => {
     if (activeCanvasItemId.value === bodyCanvasId) updateTableMenu(currentEditor)
   },
   onUpdate: ({ editor: currentEditor }) => {
+    currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty)
     if (activeCanvasItemId.value === bodyCanvasId) updateTableMenu(currentEditor)
     if (ready.value) scheduleSave()
   },
@@ -457,6 +464,11 @@ const paperSheetHeight = computed(() => Math.max(
   bodyCanvasPosition.value.y + bodyCanvasPosition.value.h + 58,
   ...canvasItems.value.map((item) => item.y + item.h + 58),
 ))
+const paperFrameStyle = computed(() => ({
+  '--paper-content-height': `${paperSheetHeight.value}px`,
+  '--paper-scale': paperScale.value,
+  height: `${Math.max(830, paperSheetHeight.value) * paperScale.value}px`,
+}))
 const previewBodyStyle = computed(() => ({
   position: 'absolute' as const,
   left: `${bodyCanvasPosition.value.x}px`,
@@ -473,6 +485,8 @@ function canvasTextHtml(item: CanvasItem) {
 }
 
 onMounted(async () => {
+  paperResizeObserver = new ResizeObserver(updatePaperScale)
+  observePaperSheet(paperSheet.value)
   window.addEventListener('pointermove', handlePointerMove)
   window.addEventListener('pointerup', stopPointerDrag)
   window.addEventListener('mouseup', stopPointerDrag)
@@ -653,12 +667,49 @@ function insertSpeechBubble() {
 }
 
 function addTable() {
-  formattingEditor.value?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+  const item = createCanvasItem('table')
+  item.richContent = {
+    type: 'doc',
+    content: [{
+      type: 'table',
+      content: Array.from({ length: 3 }, (_, row) => ({
+        type: 'tableRow',
+        content: Array.from({ length: 3 }, () => ({
+          type: row === 0 ? 'tableHeader' : 'tableCell',
+          content: [{ type: 'paragraph' }],
+        })),
+      })),
+    }],
+  }
+  canvasItems.value.push(item)
+  activeCanvasItemId.value = item.id
+  activeCanvasTextEditor.value = null
+  scheduleSave()
 }
 
 function previewHtml() {
-  return editor.value?.getHTML() ?? ''
+  return editor.value?.isEmpty ? '' : editor.value?.getHTML() ?? ''
 }
+
+function updatePaperScale() {
+  const parent = paperSheet.value?.parentElement
+  if (!parent) {
+    paperScale.value = 1
+    return
+  }
+  const style = getComputedStyle(parent)
+  const availableWidth = parent.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+  paperScale.value = Math.min(1, Math.max(0.01, availableWidth / 730))
+}
+
+function observePaperSheet(sheet?: HTMLElement) {
+  paperResizeObserver?.disconnect()
+  if (!sheet?.parentElement || !paperResizeObserver) return
+  paperResizeObserver.observe(sheet.parentElement)
+  updatePaperScale()
+}
+
+watch(paperSheet, observePaperSheet, { flush: 'post' })
 
 async function copyPublishedUrl() {
   try {
@@ -670,6 +721,7 @@ async function copyPublishedUrl() {
 }
 
 onBeforeUnmount(() => {
+  paperResizeObserver?.disconnect()
   if (saveTimer) clearTimeout(saveTimer)
   window.removeEventListener('pointermove', handlePointerMove)
   window.removeEventListener('pointerup', stopPointerDrag)
@@ -740,10 +792,11 @@ onBeforeUnmount(() => {
             <button @click="addCanvasItem('shape', 'line')">線</button>
             <button @click="addCanvasItem('drawing')"><Plus :size="13" />手書き</button>
             <button @click="addCanvasItem('quote')">吹き出し</button>
-            <button title="選択中のテキスト欄に表を追加" @mousedown.prevent @click="addTable"><Table2 :size="13" />表</button>
+            <button title="独立した表を追加" @mousedown.prevent @click="addTable"><Table2 :size="13" />表</button>
           </div>
           <div class="canvas-scroll">
-            <div v-if="!preview" ref="paperSheet" class="paper-sheet" :style="{ '--paper-content-height': `${paperSheetHeight}px` }">
+            <div v-if="!preview" class="paper-sheet-frame" :style="paperFrameStyle">
+            <div ref="paperSheet" class="paper-sheet">
               <div class="paper-meta"><span class="paper-category">{{ category }}</span><span>·</span><span>約{{ Math.max(1, Math.ceil((editor?.getText().length ?? 0) / 400)) }}分で読めます</span></div>
               <textarea v-model="title" class="paper-title" rows="2" placeholder="記事タイトル" aria-label="記事タイトル"></textarea>
               <textarea v-model="summary" class="paper-summary" rows="2" placeholder="記事の概要" aria-label="記事の概要"></textarea>
@@ -790,7 +843,7 @@ onBeforeUnmount(() => {
                     <label title="重なり順"><span>前後</span><input v-model.number="item.zIndex" type="number" step="1" aria-label="要素の重なり順" @pointerdown.stop /></label>
                     <button type="button" class="canvas-item-delete" @pointerdown.stop @click="deleteCanvasItem(item)">削除</button>
                   </div>
-                  <CanvasTextEditor v-if="item.type === 'text' || item.type === 'quote'" :item="item" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" @activate="activateCanvasTextEditor(item, $event)" @selection-update="updateCanvasTableMenu(item, $event)" @table-pointer-down="(currentEditor, wrapper) => selectCanvasTable(item, currentEditor, wrapper)" />
+                  <CanvasTextEditor v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :item="item" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" @activate="activateCanvasTextEditor(item, $event)" @selection-update="updateCanvasTableMenu(item, $event)" @table-pointer-down="(currentEditor, wrapper) => selectCanvasTable(item, currentEditor, wrapper)" />
                   <textarea v-else-if="(item.type === 'code' || item.type === 'image') && activeCanvasItemId === item.id" v-model="item.content" class="canvas-item-editor" :placeholder="item.type === 'code' ? 'コードを記述' : 'ここに内容を入力'" @pointerdown.stop></textarea>
                   <div v-else-if="item.type === 'code'" class="canvas-code-preview" :style="{ color: item.textColor || '#efede5', fontSize: `${item.fontSize ?? 14}px` }">{{ item.content }}</div>
                   <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
@@ -826,6 +879,7 @@ onBeforeUnmount(() => {
                   </template>
                 </div>
               </div>
+              </div>
             </div>
           </div>
           <div class="editor-bottom-bar"><span><span class="green-dot"></span>自動保存オン</span><span>{{ editor?.getText().length ?? 0 }} 文字</span><span class="bottom-spacer"></span><button @mousedown.prevent @click="formattingEditor?.chain().focus().setParagraph().run()">標準</button><span class="zoom-label">100%</span></div>
@@ -835,7 +889,8 @@ onBeforeUnmount(() => {
     <div v-if="preview" class="preview-overlay">
       <header class="preview-header"><button class="back-link" @click="preview = false"><X :size="17" />編集に戻る</button><span>プレビュー <small>読者にはこのように表示されます</small></span><button class="button button-publish" @click="publishArticle">公開する <ArrowRight :size="15" /></button></header>
       <article class="reader preview-reader">
-        <div class="paper-sheet preview-sheet" :style="{ '--paper-content-height': `${paperSheetHeight}px` }">
+        <div class="paper-sheet-frame preview-sheet-frame" :style="paperFrameStyle">
+        <div ref="paperSheet" class="paper-sheet preview-sheet">
           <div class="paper-meta"><span class="paper-category">{{ category }}</span><span>·</span><span>約{{ Math.max(1, Math.ceil((editor?.getText().length ?? 0) / 400)) }}分で読めます</span></div>
           <h1 class="paper-title">{{ getCanvasTitle() }}</h1>
           <div v-if="getCanvasSummary()" class="paper-summary">{{ getCanvasSummary() }}</div>
@@ -845,7 +900,7 @@ onBeforeUnmount(() => {
           <div class="reader-content" :style="previewBodyStyle" v-html="previewHtml()"></div>
           <div v-if="canvasItems.length" class="preview-canvas">
             <div v-for="(item, index) in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-              <div v-if="item.type === 'text' || item.type === 'quote'" class="canvas-item-editor reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
+              <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" class="canvas-item-editor reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
               <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
               <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
               <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content || '画像' }}</div>
@@ -883,6 +938,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+        </div>
         </div>
         <div class="reader-end"><span>✳</span><p>最後まで読んでいただき、ありがとうございます。</p></div>
       </article>

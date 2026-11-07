@@ -12,7 +12,7 @@ export interface ArticleBlock {
 
 export interface CanvasItem {
   id: string
-  type: 'text' | 'quote' | 'image' | 'code' | 'shape' | 'drawing' | 'quiz'
+  type: 'text' | 'quote' | 'table' | 'image' | 'code' | 'shape' | 'drawing' | 'quiz'
   x: number
   y: number
   w: number
