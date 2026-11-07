@@ -44,8 +44,10 @@ const canvasSurface = ref<HTMLElement>()
 const paperSheet = ref<HTMLElement>()
 const hoveredBlock = ref<{ top: number; left: number; index: number } | null>(null)
 const blockDragState = ref<{ index: number } | null>(null)
+const activeCanvasItemId = ref<string | null>(null)
 const quizQuestions = ref<QuizQuestion[]>([])
 const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(null)
+const resizeState = ref<{ id: string; corner: string; startX: number; startY: number; x: number; y: number; w: number; h: number } | null>(null)
 const activeDrawingId = ref<string | null>(null)
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -57,6 +59,7 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
     code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
     shape: { w: 160, h: 110, content: '' },
     drawing: { w: 240, h: 160, content: '', },
+    quiz: { w: 300, h: 220, content: '' },
   }
   const base = presets[type]
   const paperRect = paperSheet.value?.getBoundingClientRect()
@@ -85,11 +88,30 @@ function clamp(value: number, min: number, max: number) {
 function addCanvasItem(type: CanvasItem['type'], shape?: CanvasItem['shape']) {
   const next = createCanvasItem(type, { shape })
   canvasItems.value.push(next)
+  activeCanvasItemId.value = next.id
   scheduleSave()
 }
 
 function handlePointerMove(event: PointerEvent) {
   if (blockDragState.value) return
+  if (resizeState.value && canvasSurface.value) {
+    const state = resizeState.value
+    const item = canvasItems.value.find((entry) => entry.id === state.id)
+    if (!item) return
+    const dx = event.clientX - state.startX
+    const dy = event.clientY - state.startY
+    const east = state.corner.includes('e')
+    const south = state.corner.includes('s')
+    const west = state.corner.includes('w')
+    const north = state.corner.includes('n')
+    const nextWidth = Math.max(70, state.w + (east ? dx : west ? -dx : 0))
+    const nextHeight = Math.max(54, state.h + (south ? dy : north ? -dy : 0))
+    item.w = nextWidth
+    item.h = nextHeight
+    item.x = west ? Math.max(0, state.x + state.w - nextWidth) : state.x
+    item.y = north ? Math.max(0, state.y + state.h - nextHeight) : state.y
+    return
+  }
   if (activeDrawingId.value) {
     const item = canvasItems.value.find((entry) => entry.id === activeDrawingId.value)
     const svg = document.querySelector<SVGSVGElement>(`[data-drawing-id="${activeDrawingId.value}"]`)
@@ -114,7 +136,21 @@ function stopPointerDrag(event?: MouseEvent) {
   if (blockDragState.value && event) finishBlockDrag(event)
   blockDragState.value = null
   dragState.value = null
+  resizeState.value = null
   activeDrawingId.value = null
+}
+
+function handleCanvasOutsidePointerDown(event: PointerEvent) {
+  const target = event.target
+  if (!(target instanceof Element) || !target.closest('.canvas-item')) activeCanvasItemId.value = null
+}
+
+function selectCanvasItem(item: CanvasItem, event: PointerEvent) {
+  activeCanvasItemId.value = item.id
+  const target = event.target
+  if (!(target instanceof Element) || target.closest('textarea, input, select, button, .canvas-resize-handle, .canvas-item-header')) return
+  if (item.type === 'drawing') return
+  startCanvasDrag(item, event)
 }
 
 function getEditorBlocks() {
@@ -191,11 +227,36 @@ function finishBlockDrag(event: MouseEvent) {
 function startCanvasDrag(item: CanvasItem, event: PointerEvent) {
   const rect = canvasSurface.value?.getBoundingClientRect()
   if (!rect) return
+  activeCanvasItemId.value = item.id
   dragState.value = {
     id: item.id,
     offsetX: event.clientX - rect.left - item.x,
     offsetY: event.clientY - rect.top - item.y,
   }
+  event.preventDefault()
+}
+
+function startCanvasResize(item: CanvasItem, corner: string, event: PointerEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+  activeCanvasItemId.value = item.id
+  resizeState.value = {
+    id: item.id,
+    corner,
+    startX: event.clientX,
+    startY: event.clientY,
+    x: item.x,
+    y: item.y,
+    w: item.w,
+    h: item.h,
+  }
+}
+
+function deleteCanvasItem(item: CanvasItem) {
+  canvasItems.value = canvasItems.value.filter((entry) => entry.id !== item.id)
+  if (item.questionId) quizQuestions.value = quizQuestions.value.filter((question) => question.id !== item.questionId)
+  if (activeCanvasItemId.value === item.id) activeCanvasItemId.value = null
+  scheduleSave()
 }
 
 function createQuizQuestion(): QuizQuestion {
@@ -211,15 +272,24 @@ function createQuizQuestion(): QuizQuestion {
 }
 
 function addQuizQuestion() {
-  quizQuestions.value.push(createQuizQuestion())
+  const question = createQuizQuestion()
+  quizQuestions.value.push(question)
+  const item = createCanvasItem('quiz', { content: '', w: 300, h: 220 })
+  item.questionId = question.id
+  canvasItems.value.push(item)
+  activeCanvasItemId.value = item.id
   scheduleSave()
+}
+
+function getQuizQuestion(item: CanvasItem) {
+  return quizQuestions.value.find((question) => question.id === item.questionId)
 }
 
 function getDrawingPoint(svg: SVGSVGElement, event: PointerEvent) {
   const rect = svg.getBoundingClientRect()
   return {
-    x: clamp(event.clientX - rect.left, 0, rect.width),
-    y: clamp(event.clientY - rect.top, 0, rect.height),
+    x: clamp((event.clientX - rect.left) / rect.width * 240, 0, 240),
+    y: clamp((event.clientY - rect.top) / rect.height * 120, 0, 120),
   }
 }
 
@@ -287,6 +357,7 @@ onMounted(async () => {
   window.addEventListener('pointermove', handlePointerMove)
   window.addEventListener('pointerup', stopPointerDrag)
   window.addEventListener('mouseup', stopPointerDrag)
+  document.addEventListener('pointerdown', handleCanvasOutsidePointerDown, true)
   try {
     authorId.value = (await getCurrentUser())?.id ?? 'local-user'
     if (!isNew.value) {
@@ -300,6 +371,13 @@ onMounted(async () => {
         authorId.value = existing.authorId ?? authorId.value
         canvasItems.value = existing.canvas?.items ?? []
         quizQuestions.value = existing.quizQuestions ?? []
+        for (const question of quizQuestions.value) {
+          if (!canvasItems.value.some((item) => item.questionId === question.id)) {
+            const item = createCanvasItem('quiz')
+            item.questionId = question.id
+            canvasItems.value.push(item)
+          }
+        }
         autoSummaryEnabled.value = existing.autoSummaryEnabled ?? true
         editor.value?.commands.setContent(existing.content as JSONContent)
       } else {
@@ -473,6 +551,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', handlePointerMove)
   window.removeEventListener('pointerup', stopPointerDrag)
   window.removeEventListener('mouseup', stopPointerDrag)
+  document.removeEventListener('pointerdown', handleCanvasOutsidePointerDown, true)
   editor.value?.destroy()
 })
 </script>
@@ -503,26 +582,6 @@ onBeforeUnmount(() => {
         <button class="cover-upload" @click="coverInput?.click()"><img v-if="cover" :src="cover" alt="カバー画像" /><template v-else><ImagePlus :size="18" /><span>画像を追加</span><small>5MBまで</small></template></button>
         <input ref="coverInput" type="file" accept="image/*" class="hidden" @change="setCoverImage" />
         <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="insertImage" />
-        <div class="side-separator"></div>
-        <div class="quiz-editor-heading"><strong>クイズ</strong><button type="button" @click="addQuizQuestion"><Plus :size="13" />問題を追加</button></div>
-        <div v-for="(question, questionIndex) in quizQuestions" :key="question.id" class="quiz-editor-card">
-          <div class="quiz-editor-card-heading"><span>問題 {{ questionIndex + 1 }}</span><button type="button" @click="quizQuestions.splice(questionIndex, 1)">削除</button></div>
-          <select v-model="question.type" class="sidebar-select" aria-label="回答形式">
-            <option value="choice">選択肢式</option>
-            <option value="text">短答式</option>
-          </select>
-          <textarea v-model="question.prompt" class="sidebar-textarea quiz-editor-prompt" rows="2" placeholder="問題文を入力"></textarea>
-          <template v-if="question.type === 'choice'">
-            <label v-for="(option, optionIndex) in question.options" :key="optionIndex" class="quiz-option-editor">
-              <input v-model="question.answerIndex" type="radio" :name="`answer-${question.id}`" :value="optionIndex" :aria-label="`選択肢${optionIndex + 1}を正解にする`" />
-              <input v-model="question.options[optionIndex]" class="sidebar-input" :placeholder="`選択肢 ${optionIndex + 1}`" />
-            </label>
-            <button type="button" class="quiz-add-option" @click="question.options.push('')">選択肢を追加</button>
-          </template>
-          <input v-else v-model="question.answerText" class="sidebar-input quiz-short-answer" placeholder="答えを入力" />
-          <input v-model="question.explanation" class="sidebar-input quiz-explanation" placeholder="解説（任意）" />
-        </div>
-        <div class="side-separator"></div>
         <div class="editor-sidebar-bottom"><button @click="saveDraft" class="side-save"><Save :size="15" />下書きとして保存</button><span>画像はブラウザ内に保存されます</span></div>
       </aside>
 
@@ -570,18 +629,23 @@ onBeforeUnmount(() => {
               </div>
               <button class="add-block-button" @click="editor?.chain().focus('end').insertContent('<p></p>').run()"><Plus :size="16" />ブロックを追加</button>
               <div class="editor-hint"><Sparkles :size="13" /> Enterで次の段落へ。文章を選択すると装飾メニューが使えます。</div>
-              <div ref="canvasSurface" class="canvas-surface paper-canvas">
-                <div v-for="item in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
-                  <div class="canvas-item-header" @pointerdown="startCanvasDrag(item, $event)">
-                    <span>{{ item.type === 'text' ? 'テキスト · Markdown' : item.type === 'quote' ? '吹き出し' : item.type === 'code' ? 'コード' : item.type === 'shape' ? `図形 · ${item.shape}` : item.type === 'drawing' ? '手書き' : '画像' }}</span>
-                    <select v-if="item.type === 'shape'" v-model="item.shape" aria-label="図形の種類" @pointerdown.stop>
-                      <option value="rectangle">四角</option><option value="ellipse">円</option><option value="triangle">三角</option><option value="arrow">矢印</option><option value="line">線</option>
-                    </select>
-                    <input v-if="item.type === 'shape'" :value="item.color || '#b96c50'" type="color" aria-label="図形の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop />
-                    <button type="button" class="canvas-item-delete" @pointerdown.stop @click="canvasItems = canvasItems.filter((entry) => entry.id !== item.id); scheduleSave()">削除</button>
+              <div ref="canvasSurface" class="canvas-surface paper-canvas" @pointerdown.self="activeCanvasItemId = null">
+                <div v-for="item in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`, { selected: activeCanvasItemId === item.id }]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }" @pointerdown="selectCanvasItem(item, $event)">
+                  <div v-if="activeCanvasItemId === item.id" class="canvas-item-header" @pointerdown.stop="startCanvasDrag(item, $event)">
+                    <span title="ドラッグで位置を調整" aria-label="ドラッグで位置を調整">⠿</span>
+                    <template v-if="item.type === 'shape'">
+                      <select v-model="item.shape" aria-label="図形の種類" @pointerdown.stop>
+                        <option value="rectangle">四角</option><option value="ellipse">円</option><option value="triangle">三角</option><option value="arrow">矢印</option><option value="line">線</option>
+                      </select>
+                      <input :value="item.color || '#b96c50'" type="color" aria-label="図形の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop />
+                    </template>
+                    <button type="button" class="canvas-item-delete" @pointerdown.stop @click="deleteCanvasItem(item)">削除</button>
                   </div>
-                  <textarea v-if="item.type === 'text' || item.type === 'quote' || item.type === 'code' || item.type === 'image'" v-model="item.content" class="canvas-item-editor" :placeholder="item.type === 'code' ? 'コードを記述' : 'ここに内容を入力'" @pointerdown.stop></textarea>
-                  <div v-if="item.type === 'text'" class="canvas-markdown-preview" v-html="markdownToHtml(item.content)"></div>
+                  <textarea v-if="(item.type === 'text' || item.type === 'quote' || item.type === 'code' || item.type === 'image') && activeCanvasItemId === item.id" v-model="item.content" class="canvas-item-editor" :placeholder="item.type === 'code' ? 'コードを記述' : 'ここに内容を入力'" @pointerdown.stop></textarea>
+                  <div v-else-if="item.type === 'text' || item.type === 'quote'" class="canvas-markdown-preview" v-html="markdownToHtml(item.content)"></div>
+                  <pre v-else-if="item.type === 'code'" class="canvas-code-preview">{{ item.content }}</pre>
+                  <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
+                  <div v-else-if="item.type === 'image'" class="canvas-image-placeholder">画像URLを設定</div>
                   <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
                     <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
                     <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
@@ -592,6 +656,24 @@ onBeforeUnmount(() => {
                   <svg v-else-if="item.type === 'drawing'" class="canvas-drawing" :data-drawing-id="item.id" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス" @pointerdown="startDrawing(item, $event)">
                     <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
                   </svg>
+                  <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="canvas-quiz-editor" @pointerdown.stop="activeCanvasItemId = item.id">
+                    <select v-model="getQuizQuestion(item)!.type" aria-label="クイズの回答形式" @pointerdown.stop>
+                      <option value="choice">選択肢式</option><option value="text">短答式</option>
+                    </select>
+                    <textarea v-model="getQuizQuestion(item)!.prompt" rows="2" placeholder="問題文を入力" aria-label="クイズの問題文"></textarea>
+                    <template v-if="getQuizQuestion(item)!.type === 'choice'">
+                      <label v-for="(option, optionIndex) in getQuizQuestion(item)!.options" :key="optionIndex" class="canvas-quiz-option">
+                        <input v-model="getQuizQuestion(item)!.answerIndex" type="radio" :name="`canvas-answer-${getQuizQuestion(item)!.id}`" :value="optionIndex" :aria-label="`選択肢${optionIndex + 1}を正解にする`" />
+                        <input v-model="getQuizQuestion(item)!.options[optionIndex]" :placeholder="`選択肢 ${optionIndex + 1}`" />
+                      </label>
+                      <button type="button" class="canvas-quiz-add-option" @click="getQuizQuestion(item)!.options.push('')">選択肢を追加</button>
+                    </template>
+                    <input v-else v-model="getQuizQuestion(item)!.answerText" class="canvas-quiz-short-answer" placeholder="答えを入力" />
+                    <input v-model="getQuizQuestion(item)!.explanation" class="canvas-quiz-explanation" placeholder="解説（任意）" />
+                  </div>
+                  <template v-if="activeCanvasItemId === item.id">
+                    <span v-for="corner in ['nw', 'ne', 'sw', 'se']" :key="corner" class="canvas-resize-handle" :class="`resize-${corner}`" :aria-label="`サイズ変更 ${corner}`" @pointerdown="startCanvasResize(item, corner, $event)"></span>
+                  </template>
                 </div>
               </div>
             </div>
@@ -602,7 +684,44 @@ onBeforeUnmount(() => {
 
     <div v-if="preview" class="preview-overlay">
       <header class="preview-header"><button class="back-link" @click="preview = false"><X :size="17" />編集に戻る</button><span>プレビュー <small>読者にはこのように表示されます</small></span><button class="button button-publish" @click="publishArticle">公開する <ArrowRight :size="15" /></button></header>
-      <article class="reader preview-reader"><div class="reader-category">{{ category }} <span>·</span> 5分で読める</div><h1>{{ getCanvasTitle() }}</h1><p class="reader-summary">{{ getCanvasSummary() }}</p><div class="reader-author"><span class="avatar">M</span><span><b>あなた</b><small>たった今更新</small></span></div><div v-if="cover" class="reader-cover"><img :src="cover" alt="" /></div><div class="reader-content" v-html="previewHtml()"></div><div class="reader-end"><span>✳</span><p>最後まで読んでいただき、ありがとうございます。</p></div></article>
+      <article class="reader preview-reader">
+        <div class="paper-sheet preview-sheet" :style="{ '--paper-content-height': `${paperSheetHeight}px` }">
+          <div class="paper-meta"><span class="paper-category">{{ category }}</span><span>·</span><span>約{{ Math.max(1, Math.ceil((editor?.getText().length ?? 0) / 400)) }}分で読めます</span></div>
+          <h1 class="paper-title">{{ getCanvasTitle() }}</h1>
+          <div v-if="getCanvasSummary()" class="paper-summary">{{ getCanvasSummary() }}</div>
+          <div class="paper-author"><span class="avatar avatar-tiny">M</span><span>あなた</span><span class="paper-date">プレビュー</span></div>
+          <div class="paper-rule"></div>
+          <div v-if="cover" class="reader-cover"><img :src="cover" alt="" /></div>
+          <div class="reader-content" v-html="previewHtml()"></div>
+          <div class="preview-canvas">
+            <div v-for="item in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
+              <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown" v-html="markdownToHtml(item.content)"></div>
+              <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
+              <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
+              <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content || '画像' }}</div>
+              <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
+                <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
+                <ellipse v-else-if="item.shape === 'ellipse'" cx="80" cy="50" rx="66" ry="36" />
+                <polygon v-else-if="item.shape === 'triangle'" points="80,10 148,88 12,88" />
+                <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
+                <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
+              </svg>
+              <svg v-else-if="item.type === 'drawing'" class="reader-canvas-drawing" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書き">
+                <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
+              </svg>
+              <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="reader-canvas-quiz">
+                <span>クイズ · {{ getQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>
+                <p>{{ getQuizQuestion(item)!.prompt || '問題文' }}</p>
+                <ul v-if="getQuizQuestion(item)!.type !== 'text'">
+                  <li v-for="(option, index) in getQuizQuestion(item)!.options" :key="index">{{ option || `選択肢 ${index + 1}` }}</li>
+                </ul>
+                <div v-else class="preview-short-answer">短答式の回答欄</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="reader-end"><span>✳</span><p>最後まで読んでいただき、ありがとうございます。</p></div>
+      </article>
     </div>
 
     <div v-if="publishedUrl" class="publish-modal-backdrop" @click.self="publishedUrl = ''">

@@ -11,7 +11,7 @@ import TableHeader from '@tiptap/extension-table-header'
 import TableCell from '@tiptap/extension-table-cell'
 import { getArticle, listArticles } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
-import type { Article, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
+import type { Article, CanvasItem, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
 
 const route = useRoute()
 const article = ref<Article>()
@@ -41,14 +41,30 @@ const glossary = ref<GlossaryEntry[]>([
 
 const quizQuestions = ref<QuizQuestion[]>([])
 const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
-const quizMode = ref<'choice' | 'text'>('choice')
 
 const articleId = computed(() => String(route.params.slug))
 const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, Image, Table, TableRow, TableHeader, TableCell]) : '')
-const articleCanvasItems = computed(() => article.value?.canvas?.items ?? [])
-const articleCanvasOriginY = computed(() => articleCanvasItems.value.length ? Math.min(...articleCanvasItems.value.map((item) => item.y)) : 0)
-const articleCanvasHeight = computed(() => Math.max(340, ...articleCanvasItems.value.map((item) => item.y - articleCanvasOriginY.value + item.h + 24)))
-const articleCanvasWidth = computed(() => Math.max(320, ...articleCanvasItems.value.map((item) => item.x + item.w + 24)))
+const articleCanvasItems = computed(() => {
+  const items = [...(article.value?.canvas?.items ?? [])]
+  const placedQuestions = new Set(items.map((item) => item.questionId).filter((id): id is string => Boolean(id)))
+  let nextY = Math.max(520, ...items.map((item) => item.y + item.h + 24))
+  for (const question of publicQuizQuestions.value) {
+    if (placedQuestions.has(question.id)) continue
+    items.push({
+      id: `quiz-${question.id}`,
+      type: 'quiz',
+      questionId: question.id,
+      x: 24,
+      y: nextY,
+      w: 300,
+      h: 220,
+      content: '',
+    })
+    nextY += 244
+  }
+  return items
+})
+const articleCanvasHeight = computed(() => Math.max(340, ...articleCanvasItems.value.map((item) => item.y + item.h + 24)))
 const publicQuizQuestions = computed(() => quizQuestions.value.filter((question) => {
   if (!question.prompt.trim()) return false
   if (question.type === 'text') return Boolean(question.answerText?.trim())
@@ -58,8 +74,9 @@ const summaryEnabled = computed(() => article.value?.autoSummaryEnabled ?? true)
 const aiSummary = computed(() => article.value ? `AI要約: ${article.value.title}では、背景の整理 → 重要な仕組みの把握 → 実例に落とし込む流れで理解すると、記憶に残りやすくなります。` : '')
 const summaryText = computed(() => article.value ? `この記事の要点: ${article.value.summary}. 1. 背景を理解する 2. 重要な使い方を整理する 3. 実装へ落とし込む` : '')
 
-function questionsForMode(mode: 'choice' | 'text') {
-  return publicQuizQuestions.value.filter((question) => (question.type ?? 'choice') === mode)
+function getPublicQuizQuestion(item: CanvasItem) {
+  const question = quizQuestions.value.find((entry) => entry.id === item.questionId)
+  return question && publicQuizQuestions.value.includes(question) ? question : undefined
 }
 
 onMounted(async () => {
@@ -74,7 +91,6 @@ onMounted(async () => {
       question.id,
       { selectedIndex: null, text: '', submitted: false },
     ]))
-    quizMode.value = quizQuestions.value.some((question) => question.type === 'choice' || !question.type) ? 'choice' : 'text'
 
     const storedRecent = JSON.parse(localStorage.getItem('mangapress.history.v1') ?? '[]') as string[]
     const currentRead = `${article.value.title}|${article.value.slug}`
@@ -159,44 +175,45 @@ function submitQuiz(question: QuizQuestion) {
   </section>
   <article v-else class="reader">
     <RouterLink to="/articles" class="back-link"><ArrowLeft :size="15" />記事一覧へ戻る</RouterLink>
-    <div class="reader-category">{{ article.category }} <span>·</span> 5分で読める</div>
-    <h1>{{ article.title }}</h1>
-    <p class="reader-summary">{{ article.summary }}</p>
+    <div class="reader-article-sheet" :style="{ minHeight: `${articleCanvasHeight}px` }">
+      <div class="reader-category">{{ article.category }} <span>·</span> 5分で読める</div>
+      <h1>{{ article.title }}</h1>
+      <p class="reader-summary">{{ article.summary }}</p>
 
-    <div class="reader-author">
-      <span class="avatar">M</span>
-      <span>
-        <b>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</b>
-        <small>{{ new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(article.publishedAt || article.updatedAt)) }}に公開</small>
-      </span>
-      <button class="follow-button" :class="{ active: followed }" @click="toggleFollow">{{ followed ? 'フォロー中' : 'フォロー' }}</button>
-    </div>
+      <div class="reader-author">
+        <span class="avatar">M</span>
+        <span>
+          <b>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</b>
+          <small>{{ new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(article.publishedAt || article.updatedAt)) }}に公開</small>
+        </span>
+        <button class="follow-button" :class="{ active: followed }" @click="toggleFollow">{{ followed ? 'フォロー中' : 'フォロー' }}</button>
+      </div>
 
-    <div v-if="article.cover" class="reader-cover"><img :src="article.cover" :alt="article.title" /></div>
-    <div v-else class="reader-cover reader-cover-art"><div class="cover-note"><span>TECH JOURNAL</span><strong>{{ article.title }}</strong><i>✳</i></div></div>
+      <div v-if="article.cover" class="reader-cover"><img :src="article.cover" :alt="article.title" /></div>
+      <div v-else class="reader-cover reader-cover-art"><div class="cover-note"><span>TECH JOURNAL</span><strong>{{ article.title }}</strong><i>✳</i></div></div>
 
-    <div class="reader-toolbar">
-      <button :class="{ active: liked }" @click="toggleLike"><Heart :size="18" />{{ liked ? `${likesCount} いいね` : `${likesCount} いいね` }}</button>
-      <button :class="{ active: bookmarked }" @click="toggleBookmark"><Bookmark :size="17" />{{ bookmarked ? '保存済み' : '保存' }}</button>
-      <button @click="copyLink"><Share2 :size="17" />シェア</button>
-    </div>
+      <div class="reader-toolbar">
+        <button :class="{ active: liked }" @click="toggleLike"><Heart :size="18" />{{ liked ? `${likesCount} いいね` : `${likesCount} いいね` }}</button>
+        <button :class="{ active: bookmarked }" @click="toggleBookmark"><Bookmark :size="17" />{{ bookmarked ? '保存済み' : '保存' }}</button>
+        <button @click="copyLink"><Share2 :size="17" />シェア</button>
+      </div>
 
-    <div v-if="article.tags.length" class="reader-tags">
-      <span v-for="tag in article.tags" :key="tag"># {{ tag }}</span>
-    </div>
+      <div v-if="article.tags.length" class="reader-tags">
+        <span v-for="tag in article.tags" :key="tag"># {{ tag }}</span>
+      </div>
 
-    <details v-if="summaryEnabled" class="summary-box" :open="summaryOpen">
-      <summary @click.prevent="summaryOpen = !summaryOpen">記事の要約</summary>
-      <p>{{ aiSummary }}</p>
-      <p class="summary-note">{{ summaryText }}</p>
-    </details>
+      <details v-if="summaryEnabled" class="summary-box" :open="summaryOpen">
+        <summary @click.prevent="summaryOpen = !summaryOpen">記事の要約</summary>
+        <p>{{ aiSummary }}</p>
+        <p class="summary-note">{{ summaryText }}</p>
+      </details>
 
-    <div class="reader-content" v-html="contentHtml"></div>
-    <div v-if="articleCanvasItems.length" class="reader-canvas" :style="{ minHeight: `${articleCanvasHeight}px`, width: '100%', '--canvas-content-width': `${articleCanvasWidth}px` }">
-      <div v-for="item in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y - articleCanvasOriginY}px`, width: `${item.w}px`, height: `${item.h}px` }">
-        <span v-if="item.type !== 'shape' && item.type !== 'drawing'">{{ item.type === 'text' ? 'テキスト' : item.type === 'quote' ? '吹き出し' : item.type === 'code' ? 'コード' : '画像' }}</span>
+      <div class="reader-content" v-html="contentHtml"></div>
+      <div v-if="articleCanvasItems.length" class="reader-canvas">
+      <div v-for="item in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }">
         <div v-if="item.type === 'text' || item.type === 'quote'" class="reader-canvas-markdown" v-html="markdownToHtml(item.content)"></div>
         <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
+        <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
         <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content }}</div>
         <svg v-else-if="item.type === 'shape'" class="canvas-shape" :style="{ stroke: item.color || '#b96c50' }" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
           <rect v-if="item.shape === 'rectangle'" x="12" y="12" width="136" height="76" rx="8" />
@@ -205,9 +222,32 @@ function submitQuiz(question: QuizQuestion) {
           <line v-else-if="item.shape === 'line'" x1="12" y1="50" x2="148" y2="50" />
           <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
         </svg>
-        <svg v-else class="reader-canvas-drawing" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス">
+        <svg v-else-if="item.type === 'drawing'" class="reader-canvas-drawing" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス">
           <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
         </svg>
+        <div v-if="item.type === 'quiz' && getPublicQuizQuestion(item)" class="reader-canvas-quiz">
+          <span>クイズ · {{ getPublicQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>
+          <p>{{ getPublicQuizQuestion(item)!.prompt }}</p>
+          <div v-if="getPublicQuizQuestion(item)!.type !== 'text'" class="quiz-options">
+            <button
+              v-for="(option, index) in getPublicQuizQuestion(item)!.options"
+              :key="index"
+              :class="{ selected: quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === index, correct: quizResponses[getPublicQuizQuestion(item)!.id]?.submitted && index === getPublicQuizQuestion(item)!.answerIndex, wrong: quizResponses[getPublicQuizQuestion(item)!.id]?.submitted && quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === index && index !== getPublicQuizQuestion(item)!.answerIndex }"
+              :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted"
+              @click="quizResponses[getPublicQuizQuestion(item)!.id].selectedIndex = index"
+            >{{ option }}</button>
+          </div>
+          <textarea v-else v-model="quizResponses[getPublicQuizQuestion(item)!.id].text" class="quiz-answer-input" rows="2" placeholder="回答を入力してください" :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted"></textarea>
+          <button class="button button-primary quiz-submit" :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted || (getPublicQuizQuestion(item)!.type === 'text' ? !quizResponses[getPublicQuizQuestion(item)!.id]?.text.trim() : quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === null)" @click="submitQuiz(getPublicQuizQuestion(item)!)">
+            {{ quizResponses[getPublicQuizQuestion(item)!.id]?.submitted ? '提出済み' : '提出' }}
+          </button>
+          <div v-if="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted" class="quiz-feedback">
+            <strong>{{ getPublicQuizQuestion(item)!.type === 'text' ? '回答を受け付けました' : quizResponses[getPublicQuizQuestion(item)!.id].selectedIndex === getPublicQuizQuestion(item)!.answerIndex ? '正解です！' : '不正解です。' }}</strong>
+            <span>答え：{{ getPublicQuizQuestion(item)!.type === 'text' ? getPublicQuizQuestion(item)!.answerText : getPublicQuizQuestion(item)!.options[getPublicQuizQuestion(item)!.answerIndex] }}</span>
+            <span>{{ getPublicQuizQuestion(item)!.explanation }}</span>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -220,38 +260,6 @@ function submitQuiz(question: QuizQuestion) {
         <div class="glossary-bubble-top"><strong>{{ selectedTerm.term }}</strong><button @click="saveTerm(selectedTerm.term)">{{ savedGlossary.includes(selectedTerm.term) ? '保存済み' : 'この言葉を保存' }}</button></div>
         <p>{{ selectedTerm.definition }}</p>
       </div>
-    </section>
-
-    <section v-if="publicQuizQuestions.length" class="quiz-panel">
-      <div class="panel-header"><span class="badge">Q</span><h3>クイズ</h3></div>
-      <div class="quiz-mode-picker" role="group" aria-label="回答形式">
-        <button :class="{ active: quizMode === 'choice' }" @click="quizMode = 'choice'">選択式</button>
-        <button :class="{ active: quizMode === 'text' }" @click="quizMode = 'text'">記述式</button>
-      </div>
-      <div v-for="question in questionsForMode(quizMode)" :key="question.id" class="quiz-box">
-        <div class="quiz-question-heading"><span>{{ question.type === 'text' ? '記述式' : '選択式' }}</span><p>{{ question.prompt }}</p></div>
-        <div v-if="question.type !== 'text'" class="quiz-options">
-          <button
-            v-for="(option, index) in question.options"
-            :key="option"
-            :class="{ selected: quizResponses[question.id]?.selectedIndex === index, correct: quizResponses[question.id]?.submitted && index === question.answerIndex, wrong: quizResponses[question.id]?.submitted && quizResponses[question.id]?.selectedIndex === index && index !== question.answerIndex }"
-            :disabled="quizResponses[question.id]?.submitted"
-            @click="quizResponses[question.id].selectedIndex = index"
-          >{{ option }}</button>
-        </div>
-        <textarea v-else v-model="quizResponses[question.id].text" class="quiz-answer-input" rows="3" placeholder="回答を入力してください" :disabled="quizResponses[question.id]?.submitted"></textarea>
-        <div class="quiz-submit-row">
-          <button class="button button-primary quiz-submit" :disabled="quizResponses[question.id]?.submitted || (question.type === 'text' ? !quizResponses[question.id]?.text.trim() : quizResponses[question.id]?.selectedIndex === null)" @click="submitQuiz(question)">
-            {{ quizResponses[question.id]?.submitted ? '提出済み' : '提出' }}
-          </button>
-        </div>
-        <div v-if="quizResponses[question.id]?.submitted" class="quiz-feedback">
-          <strong>{{ question.type === 'text' ? '回答を受け付けました' : quizResponses[question.id].selectedIndex === question.answerIndex ? '正解です！' : '不正解です。' }}</strong>
-          <span class="quiz-answer-reveal">答え：{{ question.type === 'text' ? question.answerText : question.options[question.answerIndex] }}</span>
-          <span>{{ question.explanation }}</span>
-        </div>
-      </div>
-      <p v-if="!questionsForMode(quizMode).length" class="quiz-empty">この形式のクイズはありません。</p>
     </section>
 
     <section class="comments-panel">

@@ -10,7 +10,7 @@ export interface ArticleBlock {
 
 export interface CanvasItem {
   id: string
-  type: 'text' | 'quote' | 'image' | 'code' | 'shape' | 'drawing'
+  type: 'text' | 'quote' | 'image' | 'code' | 'shape' | 'drawing' | 'quiz'
   x: number
   y: number
   w: number
@@ -19,6 +19,7 @@ export interface CanvasItem {
   color?: string
   shape?: 'rectangle' | 'ellipse' | 'triangle' | 'arrow' | 'line'
   strokes?: Array<Array<{ x: number; y: number }>>
+  questionId?: string
 }
 
 export interface ArticleCanvas {
