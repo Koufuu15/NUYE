@@ -1,21 +1,18 @@
-<script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { BookOpen, ChevronDown, CircleUserRound, FilePlus2, Search, Sparkles } from 'lucide-vue-next'
-import { getCurrentUser } from './lib/articles'
-import type { AuthUser } from './types'
-
-const route = useRoute()
-const user = ref<AuthUser | null>(null)
-const isEditor = computed(() => route.path.startsWith('/editor/'))
-
+<script setup>
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { getCurrentUser } from './lib/articles';
+const route = useRoute();
+const user = ref(null);
+const isEditor = computed(() => route.path.startsWith('/editor/'));
 watch(() => route.fullPath, async () => {
-  try {
-    user.value = await getCurrentUser()
-  } catch (error) {
-    console.error('ログイン状態を取得できませんでした。', error)
-  }
-}, { immediate: true })
+    try {
+        user.value = await getCurrentUser();
+    }
+    catch (error) {
+        console.error('ログイン状態を取得できませんでした。', error);
+    }
+}, { immediate: true });
 </script>
 
 <template>

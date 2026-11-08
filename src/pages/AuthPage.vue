@@ -1,47 +1,47 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight, BookOpen, Eye, EyeOff, Sparkles } from 'lucide-vue-next'
-import { hasSupabaseConfig, signIn, signUp } from '../lib/articles'
-
-const router = useRouter()
-const mode = ref<'login' | 'signup'>('signup')
-const name = ref('')
-const email = ref('')
-const password = ref('')
-const errorText = ref('')
-const busy = ref(false)
-const showPassword = ref(false)
-const notice = ref('')
-
+<script setup>
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { hasSupabaseConfig, signIn, signUp } from '../lib/articles';
+const router = useRouter();
+const mode = ref('signup');
+const name = ref('');
+const email = ref('');
+const password = ref('');
+const errorText = ref('');
+const busy = ref(false);
+const showPassword = ref(false);
+const notice = ref('');
 async function submit() {
-  errorText.value = ''
-  notice.value = ''
-  if (!email.value.trim() || !password.value) {
-    errorText.value = 'メールアドレスとパスワードを入力してください。'
-    return
-  }
-  busy.value = true
-  try {
-    if (mode.value === 'signup') {
-      if (!name.value.trim()) {
-        errorText.value = 'お名前を入力してください。'
-        return
-      }
-      await signUp(name.value.trim(), email.value.trim(), password.value)
-      if (hasSupabaseConfig()) {
-        notice.value = '確認メールを送信しました。メール内のリンクから登録を完了してください。'
-        return
-      }
-    } else {
-      await signIn(email.value.trim(), password.value)
+    errorText.value = '';
+    notice.value = '';
+    if (!email.value.trim() || !password.value) {
+        errorText.value = 'メールアドレスとパスワードを入力してください。';
+        return;
     }
-    await router.push('/me')
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '認証に失敗しました。入力内容をご確認ください。'
-  } finally {
-    busy.value = false
-  }
+    busy.value = true;
+    try {
+        if (mode.value === 'signup') {
+            if (!name.value.trim()) {
+                errorText.value = 'お名前を入力してください。';
+                return;
+            }
+            await signUp(name.value.trim(), email.value.trim(), password.value);
+            if (hasSupabaseConfig()) {
+                notice.value = '確認メールを送信しました。メール内のリンクから登録を完了してください。';
+                return;
+            }
+        }
+        else {
+            await signIn(email.value.trim(), password.value);
+        }
+        await router.push('/me');
+    }
+    catch (error) {
+        errorText.value = error instanceof Error ? error.message : '認証に失敗しました。入力内容をご確認ください。';
+    }
+    finally {
+        busy.value = false;
+    }
 }
 </script>
 
