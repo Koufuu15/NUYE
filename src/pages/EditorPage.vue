@@ -490,12 +490,10 @@ const paperFrameStyle = computed(() => ({
   height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * (preview.value ? previewPaperScale.value : paperScale.value)}px`,
 }))
 const previewBodyStyle = computed(() => ({
-  position: 'absolute' as const,
-  left: `${bodyCanvasPosition.value.x}px`,
-  top: `${previewCanvasOffsetY.value + bodyCanvasPosition.value.y}px`,
-  width: `${bodyCanvasPosition.value.w}px`,
-  minHeight: `${bodyCanvasPosition.value.h}px`,
-  padding: '0',
+   position: 'relative' as const,
+  width: '100%',
+  minHeight: 'auto',
+  padding: '0', 
 }))
 const previewCanvasStyle = computed(() => ({
   top: `${previewCanvasOffsetY.value}px`,

@@ -896,6 +896,115 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   min-height: 63vh;
   padding-top: 61px;
 }
+.personal-library {
+  display: grid;
+  gap: 20px;
+  margin-top: 30px;
+}
+.personal-library-section {
+  padding: 22px;
+  border: 1px solid #ebe4dc;
+  border-radius: 12px;
+  background: #fffdfa;
+}
+.personal-library-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.personal-library-heading h2 {
+  margin: 0;
+  color: #3b342f;
+  font: 600 17px 'Noto Serif JP', serif;
+}
+.personal-library-heading > span {
+  color: #96877b;
+  font-size: 10px;
+}
+.personal-glossary-list, .personal-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.personal-glossary-list li, .personal-history-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid #f0ebe5;
+}
+.personal-glossary-list li > div {
+  min-width: 0;
+}
+.personal-glossary-list h3 {
+  margin: 0;
+  color: #55473e;
+  font-size: 12px;
+}
+.personal-glossary-list p, .personal-library-empty {
+  margin: 5px 0 0;
+  color: #817a73;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.personal-glossary-list button {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #e8dfd6;
+  border-radius: 5px;
+  background: white;
+  color: #8b6959;
+  font-size: 9px;
+  cursor: pointer;
+}
+.personal-glossary-list button.saved {
+  border-color: #d7b4a4;
+  background: #fcf4ef;
+  color: #a45e46;
+}
+.personal-history-list li {
+  align-items: baseline;
+}
+.personal-history-list a {
+  color: #55473e;
+  font-size: 11px;
+}
+.personal-history-list a:hover {
+  color: #a45e46;
+}
+.personal-history-list time {
+  flex: 0 0 auto;
+  color: #9a9289;
+  font-size: 9px;
+}
+.personal-library-error {
+  margin: 16px 0 0;
+  color: #a34436;
+  font-size: 11px;
+}
+.personal-articles-empty {
+  padding: 30px 20px;
+}
+.article-summary {
+  margin: 18px 0 0;
+  padding: 16px 19px;
+  border: 1px solid #eee4da;
+  border-radius: 8px;
+  background: #fcf8f3;
+}
+.article-summary h2 {
+  margin: 0 0 6px;
+  color: #a45e46;
+  font: 600 12px 'Noto Serif JP', serif;
+}
+.article-summary p {
+  margin: 0;
+  color: #817a73;
+  font-size: 12px;
+  line-height: 1.8;
+}
 .library-title-row {
   display: flex;
   align-items: end;

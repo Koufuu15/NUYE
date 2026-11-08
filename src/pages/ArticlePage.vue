@@ -10,13 +10,13 @@ import { getArticle, listArticles } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
 import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
-import type { Article, CanvasItem, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
+import type { Article, CanvasItem, CommentEntry, QuizQuestion } from '../types'
+import { recordRecentArticle } from '../lib/userLibrary'
 
 const route = useRoute()
 const article = ref<Article>()
 const loading = ref(true)
 const errorText = ref('')
-const summaryOpen = ref(true)
 const liked = ref(false)
 const bookmarked = ref(false)
 const followed = ref(false)
@@ -26,17 +26,7 @@ const comments = ref<CommentEntry[]>([
   { id: 'demo-2', author: 'ケース', body: '次は実例のコードまで見るとさらに助かります。', createdAt: '2026-11-06T10:10:00.000Z' },
 ])
 const commentDraft = ref('')
-const selectedTerm = ref<GlossaryEntry | null>(null)
-const savedGlossary = ref<string[]>([])
-const recentReads = ref<string[]>([])
 const related = ref<Article[]>([])
-
-const glossary = ref<GlossaryEntry[]>([
-  { term: 'コンポーネント', definition: 'UIを独立した部品として再利用できるようにした設計単位です。' },
-  { term: '状態管理', definition: 'UIの値や表示が変わるときに、その変化を管理する考え方です。' },
-  { term: 'API', definition: 'アプリと外部サービスのやり取りをつなぐ窓口です。' },
-  { term: 'SSR', definition: 'サーバー側でHTMLを生成して返すレンダリング方式です。' },
-])
 
 const quizQuestions = ref<QuizQuestion[]>([])
 const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
@@ -83,10 +73,6 @@ const publicQuizQuestions = computed(() => quizQuestions.value.filter((question)
   if (question.type === 'text') return Boolean(question.answerText?.trim())
   return question.options.length >= 2 && question.options.every((option) => option.trim()) && question.answerIndex >= 0 && question.answerIndex < question.options.length
 }))
-const summaryEnabled = computed(() => article.value?.autoSummaryEnabled ?? true)
-const aiSummary = computed(() => article.value ? `AI要約: ${article.value.title}では、背景の整理 → 重要な仕組みの把握 → 実例に落とし込む流れで理解すると、記憶に残りやすくなります。` : '')
-const summaryText = computed(() => article.value ? `この記事の要点: ${article.value.summary}. 1. 背景を理解する 2. 重要な使い方を整理する 3. 実装へ落とし込む` : '')
-
 function getPublicQuizQuestion(item: CanvasItem) {
   const question = quizQuestions.value.find((entry) => entry.id === item.questionId)
   return question && publicQuizQuestions.value.includes(question) ? question : undefined
@@ -111,13 +97,7 @@ onMounted(async () => {
       { selectedIndex: null, text: '', submitted: false },
     ]))
 
-    const storedRecent = JSON.parse(localStorage.getItem('mangapress.history.v1') ?? '[]') as string[]
-    const currentRead = `${article.value.title}|${article.value.slug}`
-    recentReads.value = [currentRead, ...storedRecent.filter((item) => item !== currentRead)].slice(0, 4)
-    localStorage.setItem('mangapress.history.v1', JSON.stringify(recentReads.value))
-
-    const storedGlossary = JSON.parse(localStorage.getItem('mangapress.saved-glossary.v1') ?? '[]') as string[]
-    savedGlossary.value = storedGlossary
+    recordRecentArticle(article.value)
 
     const storedComments = JSON.parse(localStorage.getItem(`mangapress.comments.${article.value.id}`) ?? 'null') as CommentEntry[] | null
     if (storedComments && storedComments.length) comments.value = storedComments
@@ -141,17 +121,6 @@ async function copyLink() {
   } catch (error) {
     console.error('URLをコピーできませんでした。', error)
   }
-}
-
-function chooseTerm(term: string) {
-  const found = glossary.value.find((entry) => entry.term === term)
-  selectedTerm.value = found ?? null
-}
-
-function saveTerm(term: string) {
-  const next = [...new Set([...savedGlossary.value, term])]
-  savedGlossary.value = next
-  localStorage.setItem('mangapress.saved-glossary.v1', JSON.stringify(next))
 }
 
 function toggleLike() {
@@ -205,35 +174,10 @@ function isQuizCorrect(question: QuizQuestion) {
     <div class="reader-article-sheet" :style="{ minHeight: `${articleCanvasHeight}px` }">
       <div class="reader-category">{{ article.category }} <span>·</span> 5分で読める</div>
       <h1>{{ article.title }}</h1>
-      <p class="reader-summary">{{ article.summary }}</p>
-
-      <div class="reader-author">
-        <span class="avatar">M</span>
-        <span>
-          <b>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</b>
-          <small>{{ new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(article.publishedAt || article.updatedAt)) }}に公開</small>
-        </span>
-        <button class="follow-button" :class="{ active: followed }" @click="toggleFollow">{{ followed ? 'フォロー中' : 'フォロー' }}</button>
-      </div>
-
-      <div v-if="article.cover" class="reader-cover"><img :src="article.cover" :alt="article.title" /></div>
-      <div v-else class="reader-cover reader-cover-art"><div class="cover-note"><span>TECH JOURNAL</span><strong>{{ article.title }}</strong><i>✳</i></div></div>
-
-      <div class="reader-toolbar">
-        <button :class="{ active: liked }" @click="toggleLike"><Heart :size="18" />{{ liked ? `${likesCount} いいね` : `${likesCount} いいね` }}</button>
-        <button :class="{ active: bookmarked }" @click="toggleBookmark"><Bookmark :size="17" />{{ bookmarked ? '保存済み' : '保存' }}</button>
-        <button @click="copyLink"><Share2 :size="17" />シェア</button>
-      </div>
-
-      <div v-if="article.tags.length" class="reader-tags">
-        <span v-for="tag in article.tags" :key="tag"># {{ tag }}</span>
-      </div>
-
-      <details v-if="summaryEnabled" class="summary-box" :open="summaryOpen">
-        <summary @click.prevent="summaryOpen = !summaryOpen">記事の要約</summary>
-        <p>{{ aiSummary }}</p>
-        <p class="summary-note">{{ summaryText }}</p>
-      </details>
+      <section class="summary-box article-summary">
+        <h2>記事の要約</h2>
+        <p>{{ article.summary }}</p>
+      </section>
 
       <div class="reader-content" :style="articleBodyStyle" v-html="contentHtml"></div>
       <div v-if="articleCanvasItems.length" class="reader-canvas">
@@ -278,16 +222,24 @@ function isQuizCorrect(question: QuizQuestion) {
       </div>
     </div>
 
-    <section class="glossary-panel">
-      <div class="panel-header"><MessageCircle :size="17" /><h3>用語辞典</h3></div>
-      <div class="term-chips">
-        <button v-for="entry in glossary" :key="entry.term" class="term-chip" @click="chooseTerm(entry.term)">{{ entry.term }}</button>
-      </div>
-      <div v-if="selectedTerm" class="glossary-bubble">
-        <div class="glossary-bubble-top"><strong>{{ selectedTerm.term }}</strong><button @click="saveTerm(selectedTerm.term)">{{ savedGlossary.includes(selectedTerm.term) ? '保存済み' : 'この言葉を保存' }}</button></div>
-        <p>{{ selectedTerm.definition }}</p>
-      </div>
-    </section>
+    <div class="reader-author">
+      <span class="avatar">M</span>
+      <span>
+        <b>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</b>
+        <small>{{ new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(article.publishedAt || article.updatedAt)) }}に公開</small>
+      </span>
+      <button class="follow-button" :class="{ active: followed }" @click="toggleFollow">{{ followed ? 'フォロー中' : 'フォロー' }}</button>
+    </div>
+
+    <div class="reader-toolbar">
+      <button :class="{ active: liked }" @click="toggleLike"><Heart :size="18" />{{ likesCount }} いいね</button>
+      <button :class="{ active: bookmarked }" @click="toggleBookmark"><Bookmark :size="17" />{{ bookmarked ? '保存済み' : '保存' }}</button>
+      <button @click="copyLink"><Share2 :size="17" />シェア</button>
+    </div>
+
+    <div v-if="article.tags.length" class="reader-tags">
+      <span v-for="tag in article.tags" :key="tag"># {{ tag }}</span>
+    </div>
 
     <section class="comments-panel">
       <div class="panel-header"><MessageCircle :size="17" /><h3>コメント</h3></div>
@@ -314,13 +266,6 @@ function isQuizCorrect(question: QuizQuestion) {
           <small>{{ item.summary }}</small>
         </RouterLink>
       </div>
-    </section>
-
-    <section class="history-panel" v-if="recentReads.length">
-      <div class="panel-header"><span class="badge">◌</span><h3>閲覧履歴</h3></div>
-      <ul class="history-list">
-        <li v-for="item in recentReads" :key="item"><span>{{ item.split('|')[0] }}</span></li>
-      </ul>
     </section>
 
     <div class="reader-end">
