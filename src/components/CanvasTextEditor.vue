@@ -3,9 +3,15 @@ import { onBeforeUnmount } from 'vue';
 import { useEditor } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import TableRow from '@tiptap/extension-table-row';
 import { markdownToHtml } from '../lib/markdown';
-import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import {
+  DraggableTableView,
+  EditableTable,
+  selectTableCell,
+  StyledTableCell,
+  StyledTableHeader,
+  StyledTableRow,
+} from '../lib/tableExtensions'
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
 const props = defineProps({
     item: { type: Object, required: true },
@@ -20,7 +26,7 @@ const editor = useEditor({
         UnderlineMark,
         Image.configure({ inline: false, allowBase64: true }),
         EditableTable.configure({ resizable: true, allowTableNodeSelection: true, View: DraggableTableView }),
-        TableRow,
+        StyledTableRow,
         StyledTableHeader,
         StyledTableCell,
     ],

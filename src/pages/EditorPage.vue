@@ -5,11 +5,17 @@ import { useEditor } from '@tiptap/vue-3';
 import { generateHTML } from '@tiptap/core';
 import { Blockquote } from '@tiptap/extension-blockquote';
 import Image from '@tiptap/extension-image';
-import TableRow from '@tiptap/extension-table-row';
 import StarterKit from '@tiptap/starter-kit';
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles';
 import { markdownToHtml } from '../lib/markdown';
-import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import {
+  DraggableTableView,
+  EditableTable,
+  selectTableCell,
+  StyledTableCell,
+  StyledTableHeader,
+  StyledTableRow,
+} from '../lib/tableExtensions'
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
 const route = useRoute();
 const router = useRouter();
@@ -437,7 +443,7 @@ const editor = useEditor({
         UnderlineMark,
         Image.configure({ inline: false, allowBase64: true }),
         EditableTable.configure({ resizable: true, allowTableNodeSelection: true, View: DraggableTableView }),
-        TableRow,
+        StyledTableRow,
         StyledTableHeader,
         StyledTableCell,
     ],
@@ -492,7 +498,7 @@ function openPreview() {
 }
 function canvasTextHtml(item) {
     return item.richContent
-        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, StyledTableRow, StyledTableHeader, StyledTableCell])
         : markdownToHtml(item.content);
 }
 onMounted(async () => {
