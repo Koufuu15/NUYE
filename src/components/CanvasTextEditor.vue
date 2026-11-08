@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount } from 'vue';
-import { useEditor } from '@tiptap/vue-3';
+import { useEditor, EditorContent } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import { markdownToHtml } from '../lib/markdown';

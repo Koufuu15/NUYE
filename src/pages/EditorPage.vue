@@ -1,11 +1,35 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useEditor } from '@tiptap/vue-3';
+import { useEditor, EditorContent } from '@tiptap/vue-3';
 import { generateHTML } from '@tiptap/core';
 import { Blockquote } from '@tiptap/extension-blockquote';
 import Image from '@tiptap/extension-image';
 import StarterKit from '@tiptap/starter-kit';
+import {
+    BookOpen,
+    ArrowLeft,
+    Eye,
+    ArrowRight,
+    ChevronDown,
+    Sparkles,
+    ImagePlus,
+    Save,
+    Undo2,
+    Redo2,
+    Bold,
+    Italic,
+    Highlighter,
+    Underline,
+    List,
+    ListOrdered,
+    MessageSquareQuote,
+    Code2,
+    Plus,
+    Table2,
+    X,
+    Check,
+} from 'lucide-vue-next';
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles';
 import { markdownToHtml } from '../lib/markdown';
 import {
@@ -17,6 +41,7 @@ import {
   StyledTableRow,
 } from '../lib/tableExtensions'
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
+import CanvasTextEditor from '../components/CanvasTextEditor.vue';
 const route = useRoute();
 const router = useRouter();
 const articleId = computed(() => String(route.params.id ?? ''));
