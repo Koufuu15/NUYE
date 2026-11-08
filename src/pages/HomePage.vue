@@ -1,24 +1,20 @@
-<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { ArrowDown, ArrowRight, ArrowUpRight, Blocks, PenLine, Sparkles } from 'lucide-vue-next'
-import ArticleCard from '../components/ArticleCard.vue'
-import { listArticles } from '../lib/articles'
-import type { Article } from '../types'
-
-const articles = ref<Article[]>([])
-const loading = ref(true)
-const featured = computed(() => articles.value[0])
-
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { listArticles } from '../lib/articles';
+const articles = ref([]);
+const loading = ref(true);
+const featured = computed(() => articles.value[0]);
 onMounted(async () => {
-  try {
-    articles.value = await listArticles()
-  } catch (error) {
-    console.error('記事一覧を読み込めませんでした。', error)
-  } finally {
-    loading.value = false
-  }
-})
+    try {
+        articles.value = await listArticles();
+    }
+    catch (error) {
+        console.error('記事一覧を読み込めませんでした。', error);
+    }
+    finally {
+        loading.value = false;
+    }
+});
 </script>
 
 <template>

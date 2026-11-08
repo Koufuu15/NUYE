@@ -1,165 +1,155 @@
-<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { ArrowLeft, Bookmark, Heart, MessageCircle, Share2 } from 'lucide-vue-next'
-import { generateHTML } from '@tiptap/core'
-import StarterKit from '@tiptap/starter-kit'
-import Image from '@tiptap/extension-image'
-import TableRow from '@tiptap/extension-table-row'
-import { getArticle, listArticles } from '../lib/articles'
-import { markdownToHtml } from '../lib/markdown'
-import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
-import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
-import type { Article, CanvasItem, CommentEntry, QuizQuestion } from '../types'
-import { recordRecentArticle } from '../lib/userLibrary'
-
-const route = useRoute()
-const article = ref<Article>()
-const loading = ref(true)
-const errorText = ref('')
-const liked = ref(false)
-const bookmarked = ref(false)
-const followed = ref(false)
-const likesCount = ref(124)
-const comments = ref<CommentEntry[]>([
-  { id: 'demo-1', author: 'なし', body: 'わかりやすい説明で、実装のイメージがつきました。', createdAt: '2026-11-05T09:15:00.000Z' },
-  { id: 'demo-2', author: 'ケース', body: '次は実例のコードまで見るとさらに助かります。', createdAt: '2026-11-06T10:10:00.000Z' },
-])
-const commentDraft = ref('')
-const related = ref<Article[]>([])
-
-const quizQuestions = ref<QuizQuestion[]>([])
-const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
-
-const articleId = computed(() => String(route.params.slug))
-const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '')
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import { generateHTML } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Image from '@tiptap/extension-image';
+import TableRow from '@tiptap/extension-table-row';
+import { getArticle, listArticles } from '../lib/articles';
+import { markdownToHtml } from '../lib/markdown';
+import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
+import { recordRecentArticle } from '../lib/userLibrary';
+const route = useRoute();
+const article = ref();
+const loading = ref(true);
+const errorText = ref('');
+const liked = ref(false);
+const bookmarked = ref(false);
+const followed = ref(false);
+const likesCount = ref(124);
+const comments = ref([
+    { id: 'demo-1', author: 'なし', body: 'わかりやすい説明で、実装のイメージがつきました。', createdAt: '2026-11-05T09:15:00.000Z' },
+    { id: 'demo-2', author: 'ケース', body: '次は実例のコードまで見るとさらに助かります。', createdAt: '2026-11-06T10:10:00.000Z' },
+]);
+const commentDraft = ref('');
+const related = ref([]);
+const quizQuestions = ref([]);
+const quizResponses = ref({});
+const articleId = computed(() => String(route.params.slug));
+const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '');
 const articleCanvasItems = computed(() => {
-  const items = [...(article.value?.canvas?.items ?? [])]
-  const placedQuestions = new Set(items.map((item) => item.questionId).filter((id): id is string => Boolean(id)))
-  let nextY = Math.max(520, ...items.map((item) => item.y + item.h + 24))
-  for (const question of publicQuizQuestions.value) {
-    if (placedQuestions.has(question.id)) continue
-    items.push({
-      id: `quiz-${question.id}`,
-      type: 'quiz',
-      questionId: question.id,
-      x: 24,
-      y: nextY,
-      w: 300,
-      h: 220,
-      content: '',
-    })
-    nextY += 244
-  }
-  return items
-})
-const articleCanvasHeight = computed(() => Math.max(
-  article.value?.canvas?.body ? article.value.canvas.body.y + article.value.canvas.body.h + 58 : 0,
-  ...articleCanvasItems.value.map((item) => item.y + item.h + 24),
-))
+    const items = [...(article.value?.canvas?.items ?? [])];
+    const placedQuestions = new Set(items.map((item) => item.questionId).filter((id) => Boolean(id)));
+    let nextY = Math.max(520, ...items.map((item) => item.y + item.h + 24));
+    for (const question of publicQuizQuestions.value) {
+        if (placedQuestions.has(question.id))
+            continue;
+        items.push({
+            id: `quiz-${question.id}`,
+            type: 'quiz',
+            questionId: question.id,
+            x: 24,
+            y: nextY,
+            w: 300,
+            h: 220,
+            content: '',
+        });
+        nextY += 244;
+    }
+    return items;
+});
+const articleCanvasHeight = computed(() => Math.max(article.value?.canvas?.body ? article.value.canvas.body.y + article.value.canvas.body.h + 58 : 0, ...articleCanvasItems.value.map((item) => item.y + item.h + 24)));
 const articleBodyStyle = computed(() => {
-  const body = article.value?.canvas?.body
-  return body ? {
-    position: 'absolute' as const,
-    left: `${body.x}px`,
-    top: `${body.y}px`,
-    width: `${body.w}px`,
-    minHeight: `${body.h}px`,
-    padding: '0',
-  } : undefined
-})
+    const body = article.value?.canvas?.body;
+    return body ? {
+        position: 'absolute',
+        left: `${body.x}px`,
+        top: `${body.y}px`,
+        width: `${body.w}px`,
+        minHeight: `${body.h}px`,
+        padding: '0',
+    } : undefined;
+});
 const publicQuizQuestions = computed(() => quizQuestions.value.filter((question) => {
-  if (!question.prompt.trim()) return false
-  if (question.type === 'text') return Boolean(question.answerText?.trim())
-  return question.options.length >= 2 && question.options.every((option) => option.trim()) && question.answerIndex >= 0 && question.answerIndex < question.options.length
-}))
-function getPublicQuizQuestion(item: CanvasItem) {
-  const question = quizQuestions.value.find((entry) => entry.id === item.questionId)
-  return question && publicQuizQuestions.value.includes(question) ? question : undefined
+    if (!question.prompt.trim())
+        return false;
+    if (question.type === 'text')
+        return Boolean(question.answerText?.trim());
+    return question.options.length >= 2 && question.options.every((option) => option.trim()) && question.answerIndex >= 0 && question.answerIndex < question.options.length;
+}));
+function getPublicQuizQuestion(item) {
+    const question = quizQuestions.value.find((entry) => entry.id === item.questionId);
+    return question && publicQuizQuestions.value.includes(question) ? question : undefined;
 }
-
-function getCanvasTextHtml(item: CanvasItem) {
-  return item.richContent
-    ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
-    : markdownToHtml(item.content)
+function getCanvasTextHtml(item) {
+    return item.richContent
+        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+        : markdownToHtml(item.content);
 }
-
 onMounted(async () => {
-  try {
-    article.value = await getArticle(articleId.value)
-    if (!article.value || article.value.status !== 'published') {
-      errorText.value = 'この記事は見つかりませんでした。'
-      return
+    try {
+        article.value = await getArticle(articleId.value);
+        if (!article.value || article.value.status !== 'published') {
+            errorText.value = 'この記事は見つかりませんでした。';
+            return;
+        }
+        quizQuestions.value = article.value.quizQuestions ?? [];
+        quizResponses.value = Object.fromEntries(quizQuestions.value.map((question) => [
+            question.id,
+            { selectedIndex: null, text: '', submitted: false },
+        ]));
+        recordRecentArticle(article.value);
+        const storedComments = JSON.parse(localStorage.getItem(`mangapress.comments.${article.value.id}`) ?? 'null');
+        if (storedComments && storedComments.length)
+            comments.value = storedComments;
+        const allArticles = await listArticles();
+        related.value = allArticles.filter((item) => item.id !== article.value?.id && item.category === article.value?.category).slice(0, 3);
+        if (!related.value.length) {
+            related.value = allArticles.filter((item) => item.id !== article.value?.id).slice(0, 3);
+        }
     }
-    quizQuestions.value = article.value.quizQuestions ?? []
-    quizResponses.value = Object.fromEntries(quizQuestions.value.map((question) => [
-      question.id,
-      { selectedIndex: null, text: '', submitted: false },
-    ]))
-
-    recordRecentArticle(article.value)
-
-    const storedComments = JSON.parse(localStorage.getItem(`mangapress.comments.${article.value.id}`) ?? 'null') as CommentEntry[] | null
-    if (storedComments && storedComments.length) comments.value = storedComments
-
-    const allArticles = await listArticles()
-    related.value = allArticles.filter((item) => item.id !== article.value?.id && item.category === article.value?.category).slice(0, 3)
-    if (!related.value.length) {
-      related.value = allArticles.filter((item) => item.id !== article.value?.id).slice(0, 3)
+    catch (error) {
+        errorText.value = error instanceof Error ? error.message : '記事を読み込めませんでした。';
     }
-  } catch (error) {
-    errorText.value = error instanceof Error ? error.message : '記事を読み込めませんでした。'
-  } finally {
-    loading.value = false
-  }
-})
-
+    finally {
+        loading.value = false;
+    }
+});
 async function copyLink() {
-  try {
-    await navigator.clipboard.writeText(window.location.href)
-    window.alert('記事URLをコピーしました。')
-  } catch (error) {
-    console.error('URLをコピーできませんでした。', error)
-  }
+    try {
+        await navigator.clipboard.writeText(window.location.href);
+        window.alert('記事URLをコピーしました。');
+    }
+    catch (error) {
+        console.error('URLをコピーできませんでした。', error);
+    }
 }
-
 function toggleLike() {
-  liked.value = !liked.value
-  likesCount.value += liked.value ? 1 : -1
+    liked.value = !liked.value;
+    likesCount.value += liked.value ? 1 : -1;
 }
-
 function toggleBookmark() {
-  bookmarked.value = !bookmarked.value
+    bookmarked.value = !bookmarked.value;
 }
-
 function toggleFollow() {
-  followed.value = !followed.value
+    followed.value = !followed.value;
 }
-
 function addComment() {
-  if (!commentDraft.value.trim()) return
-  comments.value.unshift({
-    id: crypto.randomUUID(),
-    author: 'あなた',
-    body: commentDraft.value.trim(),
-    createdAt: new Date().toISOString(),
-  })
-  localStorage.setItem(`mangapress.comments.${article.value?.id ?? articleId.value}`, JSON.stringify(comments.value))
-  commentDraft.value = ''
+    if (!commentDraft.value.trim())
+        return;
+    comments.value.unshift({
+        id: crypto.randomUUID(),
+        author: 'あなた',
+        body: commentDraft.value.trim(),
+        createdAt: new Date().toISOString(),
+    });
+    localStorage.setItem(`mangapress.comments.${article.value?.id ?? articleId.value}`, JSON.stringify(comments.value));
+    commentDraft.value = '';
 }
-
-function submitQuiz(question: QuizQuestion) {
-  const response = quizResponses.value[question.id]
-  if (!response) return
-  response.submitted = true
+function submitQuiz(question) {
+    const response = quizResponses.value[question.id];
+    if (!response)
+        return;
+    response.submitted = true;
 }
-
-function isQuizCorrect(question: QuizQuestion) {
-  const response = quizResponses.value[question.id]
-  if (!response) return false
-  return question.type === 'text'
-    ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
-    : response.selectedIndex === question.answerIndex
+function isQuizCorrect(question) {
+    const response = quizResponses.value[question.id];
+    if (!response)
+        return false;
+    return question.type === 'text'
+        ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
+        : response.selectedIndex === question.answerIndex;
 }
 </script>
 
@@ -197,25 +187,25 @@ function isQuizCorrect(question: QuizQuestion) {
           <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
         </svg>
         <div v-if="item.type === 'quiz' && getPublicQuizQuestion(item)" class="reader-canvas-quiz">
-          <span>クイズ · {{ getPublicQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>
-          <p>{{ getPublicQuizQuestion(item)!.prompt }}</p>
-          <div v-if="getPublicQuizQuestion(item)!.type !== 'text'" class="quiz-options">
+          <span>クイズ · {{ getPublicQuizQuestion(item).type === 'text' ? '短答式' : '選択肢式' }}</span>
+          <p>{{ getPublicQuizQuestion(item).prompt }}</p>
+          <div v-if="getPublicQuizQuestion(item).type !== 'text'" class="quiz-options">
             <button
-              v-for="(option, index) in getPublicQuizQuestion(item)!.options"
+              v-for="(option, index) in getPublicQuizQuestion(item).options"
               :key="index"
-              :class="{ selected: quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === index, correct: quizResponses[getPublicQuizQuestion(item)!.id]?.submitted && index === getPublicQuizQuestion(item)!.answerIndex, wrong: quizResponses[getPublicQuizQuestion(item)!.id]?.submitted && quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === index && index !== getPublicQuizQuestion(item)!.answerIndex }"
-              :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted"
-              @click="quizResponses[getPublicQuizQuestion(item)!.id].selectedIndex = index"
+              :class="{ selected: quizResponses[getPublicQuizQuestion(item).id]?.selectedIndex === index, correct: quizResponses[getPublicQuizQuestion(item).id]?.submitted && index === getPublicQuizQuestion(item).answerIndex, wrong: quizResponses[getPublicQuizQuestion(item).id]?.submitted && quizResponses[getPublicQuizQuestion(item).id]?.selectedIndex === index && index !== getPublicQuizQuestion(item).answerIndex }"
+              :disabled="quizResponses[getPublicQuizQuestion(item).id]?.submitted"
+              @click="quizResponses[getPublicQuizQuestion(item).id].selectedIndex = index"
             >{{ option }}</button>
           </div>
-          <textarea v-else v-model="quizResponses[getPublicQuizQuestion(item)!.id].text" class="quiz-answer-input" rows="2" placeholder="回答を入力してください" :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted"></textarea>
-          <button class="button button-primary quiz-submit" :disabled="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted || (getPublicQuizQuestion(item)!.type === 'text' ? !quizResponses[getPublicQuizQuestion(item)!.id]?.text.trim() : quizResponses[getPublicQuizQuestion(item)!.id]?.selectedIndex === null)" @click="submitQuiz(getPublicQuizQuestion(item)!)">
-            {{ quizResponses[getPublicQuizQuestion(item)!.id]?.submitted ? '提出済み' : '提出' }}
+          <textarea v-else v-model="quizResponses[getPublicQuizQuestion(item).id].text" class="quiz-answer-input" rows="2" placeholder="回答を入力してください" :disabled="quizResponses[getPublicQuizQuestion(item).id]?.submitted"></textarea>
+          <button class="button button-primary quiz-submit" :disabled="quizResponses[getPublicQuizQuestion(item).id]?.submitted || (getPublicQuizQuestion(item).type === 'text' ? !quizResponses[getPublicQuizQuestion(item).id]?.text.trim() : quizResponses[getPublicQuizQuestion(item).id]?.selectedIndex === null)" @click="submitQuiz(getPublicQuizQuestion(item))">
+            {{ quizResponses[getPublicQuizQuestion(item).id]?.submitted ? '提出済み' : '提出' }}
           </button>
-          <div v-if="quizResponses[getPublicQuizQuestion(item)!.id]?.submitted" class="quiz-feedback">
-            <strong>{{ isQuizCorrect(getPublicQuizQuestion(item)!) ? '正解です！' : '不正解です。' }}</strong>
-            <span>答え：{{ getPublicQuizQuestion(item)!.type === 'text' ? getPublicQuizQuestion(item)!.answerText : getPublicQuizQuestion(item)!.options[getPublicQuizQuestion(item)!.answerIndex] }}</span>
-            <span>{{ getPublicQuizQuestion(item)!.explanation }}</span>
+          <div v-if="quizResponses[getPublicQuizQuestion(item).id]?.submitted" class="quiz-feedback">
+            <strong>{{ isQuizCorrect(getPublicQuizQuestion(item)) ? '正解です！' : '不正解です。' }}</strong>
+            <span>答え：{{ getPublicQuizQuestion(item).type === 'text' ? getPublicQuizQuestion(item).answerText : getPublicQuizQuestion(item).options[getPublicQuizQuestion(item).answerIndex] }}</span>
+            <span>{{ getPublicQuizQuestion(item).explanation }}</span>
           </div>
         </div>
       </div>

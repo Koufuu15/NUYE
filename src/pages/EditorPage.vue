@@ -1,766 +1,760 @@
-<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { EditorContent, useEditor } from '@tiptap/vue-3'
-import { generateHTML, type Editor, type JSONContent } from '@tiptap/core'
-import { Blockquote } from '@tiptap/extension-blockquote'
-import Image from '@tiptap/extension-image'
-import TableRow from '@tiptap/extension-table-row'
-import StarterKit from '@tiptap/starter-kit'
-import {
-  ArrowLeft, ArrowRight, Bold, BookOpen, Check, ChevronDown, Code2, Eye, Highlighter, ImagePlus, Italic, Underline,
-  List, ListOrdered, MessageSquareQuote, Plus, Redo2,
-  Save, Sparkles, Table2, Undo2, X,
-} from 'lucide-vue-next'
-import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles'
-import { markdownToHtml } from '../lib/markdown'
-import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
-import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
-import type { Article, CanvasItem, QuizQuestion } from '../types'
-import CanvasTextEditor from '../components/CanvasTextEditor.vue'
-
-const route = useRoute()
-const router = useRouter()
-const articleId = computed(() => String(route.params.id ?? ''))
-const isNew = computed(() => route.path.endsWith('/new'))
-const title = ref('')
-const summary = ref('')
-const category = ref('テクノロジー')
-const tagsInput = ref('')
-const cover = ref('')
-const autoSummaryEnabled = ref(true)
-const authorId = ref<string>()
-const preview = ref(false)
-const saving = ref(false)
-const saveMessage = ref('保存しました')
-const saveError = ref('')
-const publishedUrl = ref('')
-const ready = ref(false)
-const fileInput = ref<HTMLInputElement>()
-const coverInput = ref<HTMLInputElement>()
-const canvasItems = ref<CanvasItem[]>([])
-const canvasSurface = ref<HTMLElement>()
-const paperSheet = ref<HTMLElement>()
-const paperScale = ref(1)
-const previewPaperScale = ref(1)
-const previewCanvasOffsetY = ref(0)
-const activeCanvasItemId = ref<string | null>(null)
-const activeCanvasTextEditor = shallowRef<Editor | null>(null)
-const selectedTableEditor = shallowRef<Editor | null>(null)
-const tableMenuPosition = ref<{ left: number; top: number } | null>(null)
-const tableOutlinePosition = ref<{ left: number; top: number; width: number; height: number } | null>(null)
-const bodyCanvasPosition = ref({ x: 70, y: 290, w: 590, h: 430 })
-const quizQuestions = ref<QuizQuestion[]>([])
-const previewQuizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
-const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(null)
-const resizeState = ref<{ id: string; corner: string; startX: number; startY: number; x: number; y: number; w: number; h: number } | null>(null)
-const activeDrawingId = ref<string | null>(null)
-const highlightColor = ref('#fff176')
-let saveTimer: ReturnType<typeof setTimeout> | undefined
-let paperResizeObserver: ResizeObserver | undefined
-const bodyCanvasId = 'article-body-canvas'
-let selectedTableWrapper: HTMLElement | null = null
-
-function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasItem> = {}): CanvasItem {
-  const presets: Record<CanvasItem['type'], { w: number; h: number; content: string }> = {
-    text: { w: 240, h: 160, content: '## 要点\nここに文章を入力します。**Markdown** に対応しています。' },
-    quote: { w: 240, h: 120, content: '大切なメッセージを、読者がすぐ見える位置に置きましょう。' },
-    table: { w: 320, h: 180, content: '' },
-    image: { w: 260, h: 150, content: '画像要素はブロック編集から追加できます。' },
-    code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
-    shape: { w: 160, h: 110, content: '' },
-    drawing: { w: 240, h: 160, content: '', },
-    quiz: { w: 300, h: 220, content: '' },
-  }
-  const base = presets[type]
-  const paperRect = paperSheet.value?.getBoundingClientRect()
-  const contentRect = editor.value?.view.dom.getBoundingClientRect()
-  const defaultY = paperRect && contentRect
-    ? Math.max(260, (contentRect.bottom - paperRect.top) / paperScale.value + 24) + canvasItems.value.length * 22
-    : 260 + canvasItems.value.length * 42
-  const defaultZIndex = Math.max(0, ...canvasItems.value.map((item) => item.zIndex ?? 0)) + 1
-  return {
-    id: crypto.randomUUID(),
-    type,
-    x: overrides.x ?? 24 + (canvasItems.value.length % 4) * 55,
-    y: overrides.y ?? defaultY,
-    w: overrides.w ?? base.w,
-    h: overrides.h ?? base.h,
-    zIndex: overrides.zIndex ?? defaultZIndex,
-    content: overrides.content ?? base.content,
-    color: overrides.color ?? (type === 'shape' ? '#b96c50' : type === 'drawing' ? '#7f6658' : undefined),
-    fillColor: overrides.fillColor,
-    strokeWidth: overrides.strokeWidth ?? (type === 'drawing' ? 3 : 2),
-    cornerRadius: overrides.cornerRadius ?? 8,
-    textColor: overrides.textColor ?? '#3a3430',
-    fontSize: overrides.fontSize ?? 14,
-    shape: overrides.shape,
-    strokes: overrides.strokes ?? (type === 'drawing' ? [] : undefined),
-  }
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
-}
-
-function addCanvasItem(type: CanvasItem['type'], shape?: CanvasItem['shape']) {
-  const next = createCanvasItem(type, { shape })
-  canvasItems.value.push(next)
-  activeCanvasItemId.value = next.id
-  scheduleSave()
-}
-
-function handlePointerMove(event: PointerEvent) {
-  if (resizeState.value && canvasSurface.value) {
-    const state = resizeState.value
-    const item = state.id === bodyCanvasId ? bodyCanvasPosition.value : canvasItems.value.find((entry) => entry.id === state.id)
-    if (!item) return
-    const dx = (event.clientX - state.startX) / paperScale.value
-    const dy = (event.clientY - state.startY) / paperScale.value
-    const east = state.corner.includes('e')
-    const south = state.corner.includes('s')
-    const west = state.corner.includes('w')
-    const north = state.corner.includes('n')
-    const nextWidth = Math.max(70, state.w + (east ? dx : west ? -dx : 0))
-    const nextHeight = Math.max(54, state.h + (south ? dy : north ? -dy : 0))
-    item.w = nextWidth
-    item.h = nextHeight
-    item.x = west ? Math.max(0, state.x + state.w - nextWidth) : state.x
-    item.y = north ? Math.max(0, state.y + state.h - nextHeight) : state.y
-    return
-  }
-  if (activeDrawingId.value) {
-    const item = canvasItems.value.find((entry) => entry.id === activeDrawingId.value)
-    const svg = document.querySelector<SVGSVGElement>(`[data-drawing-id="${activeDrawingId.value}"]`)
-    const point = svg ? getDrawingPoint(svg, event) : null
-    const strokes = item?.strokes
-    const stroke = strokes?.[strokes.length - 1]
-    if (point && stroke) stroke.push(point)
-    return
-  }
-  if (!dragState.value || !canvasSurface.value) return
-  const rect = canvasSurface.value.getBoundingClientRect()
-  const item = dragState.value.id === bodyCanvasId
-    ? bodyCanvasPosition.value
-    : canvasItems.value.find((entry) => entry.id === dragState.value?.id)
-  if (!item) return
-  const nextX = clamp((event.clientX - rect.left) / paperScale.value - dragState.value.offsetX, 14, Math.max(14, rect.width / paperScale.value - item.w - 14))
-  const nextY = clamp((event.clientY - rect.top) / paperScale.value - dragState.value.offsetY, 14, Math.max(14, rect.height / paperScale.value - item.h - 14))
-  item.x = nextX
-  item.y = nextY
-}
-
-function stopPointerDrag(event?: MouseEvent) {
-  if (dragState.value || resizeState.value) scheduleSave()
-  dragState.value = null
-  resizeState.value = null
-  activeDrawingId.value = null
-}
-
-function handleCanvasOutsidePointerDown(event: PointerEvent) {
-  const target = event.target
-  if (!(target instanceof Element) || !target.closest('.canvas-item, .editor-toolbar, .sheet-item-tools, .table-floating-menu')) {
-    activeCanvasItemId.value = null
-    activeCanvasTextEditor.value = null
-    selectedTableWrapper?.classList.remove('table-selected')
-    selectedTableWrapper = null
-    selectedTableEditor.value = null
-    tableMenuPosition.value = null
-    tableOutlinePosition.value = null
-  }
-}
-
-function selectCanvasItem(item: CanvasItem, event: PointerEvent) {
-  activeCanvasItemId.value = item.id
-  const canvasEditor = event.currentTarget instanceof HTMLElement
-    ? event.currentTarget.querySelector<HTMLElement>('.canvas-item-editor[contenteditable="true"]')
-    : null
-  if (!canvasEditor) activeCanvasTextEditor.value = null
-  const target = event.target
-  if (!(target instanceof Element) || target.closest('textarea, input, select, button, .canvas-resize-handle, .canvas-item-header, [contenteditable="true"]')) return
-  if (item.type === 'drawing') return
-  startCanvasDrag(item, event)
-}
-
-function startCanvasDrag(item: CanvasItem, event: PointerEvent) {
-  const rect = canvasSurface.value?.getBoundingClientRect()
-  if (!rect) return
-  activeCanvasItemId.value = item.id
-  dragState.value = {
-    id: item.id,
-    offsetX: (event.clientX - rect.left) / paperScale.value - item.x,
-    offsetY: (event.clientY - rect.top) / paperScale.value - item.y,
-  }
-  event.preventDefault()
-}
-
-function startBodyCanvasDrag(event: PointerEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  activeCanvasItemId.value = bodyCanvasId
-  activeCanvasTextEditor.value = null
-  const rect = canvasSurface.value?.getBoundingClientRect()
-  if (!rect) return
-  dragState.value = {
-    id: bodyCanvasId,
-    offsetX: (event.clientX - rect.left) / paperScale.value - bodyCanvasPosition.value.x,
-    offsetY: (event.clientY - rect.top) / paperScale.value - bodyCanvasPosition.value.y,
-  }
-}
-
-function startCanvasResize(item: CanvasItem, corner: string, event: PointerEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  activeCanvasItemId.value = item.id
-  resizeState.value = {
-    id: item.id,
-    corner,
-    startX: event.clientX,
-    startY: event.clientY,
-    x: item.x,
-    y: item.y,
-    w: item.w,
-    h: item.h,
-  }
-}
-
-function startBodyCanvasResize(corner: string, event: PointerEvent) {
-  event.preventDefault()
-  event.stopPropagation()
-  activeCanvasItemId.value = bodyCanvasId
-  resizeState.value = {
-    id: bodyCanvasId,
-    corner,
-    startX: event.clientX,
-    startY: event.clientY,
-    ...bodyCanvasPosition.value,
-  }
-}
-
-function updateTableMenu(currentEditor: Editor) {
-  const paperRect = paperSheet.value?.getBoundingClientRect()
-  if (!paperRect || !currentEditor.isActive('table')) {
-    selectedTableWrapper?.classList.remove('table-selected')
-    selectedTableWrapper = null
-    selectedTableEditor.value = null
-    tableMenuPosition.value = null
-    tableOutlinePosition.value = null
-    return
-  }
-  const selectionNode = currentEditor.view.domAtPos(currentEditor.state.selection.from).node
-  const selectionElement = selectionNode instanceof Element ? selectionNode : selectionNode.parentElement
-  const wrapper = selectionElement?.closest<HTMLElement>('.tableWrapper')
-  if (!wrapper) {
-    selectedTableWrapper?.classList.remove('table-selected')
-    selectedTableWrapper = null
-    selectedTableEditor.value = null
-    tableMenuPosition.value = null
-    tableOutlinePosition.value = null
-    return
-  }
-  showTableMenu(wrapper, currentEditor, paperRect)
-}
-
-function showTableMenu(wrapper: HTMLElement, currentEditor?: Editor, paperRect = paperSheet.value?.getBoundingClientRect()) {
-  if (!paperRect) return
-  selectedTableWrapper?.classList.remove('table-selected')
-  wrapper.classList.add('table-selected')
-  selectedTableWrapper = wrapper
-  if (currentEditor) selectedTableEditor.value = currentEditor
-  const rect = wrapper.getBoundingClientRect()
-  tableMenuPosition.value = {
-    left: clamp((rect.left - paperRect.left) / paperScale.value, 8, Math.max(8, paperRect.width / paperScale.value - 290)),
-    top: clamp((rect.bottom - paperRect.top) / paperScale.value + 8, 8, Math.max(8, paperRect.height / paperScale.value - 44)),
-  }
-  tableOutlinePosition.value = {
-    left: (rect.left - paperRect.left) / paperScale.value - 4,
-    top: (rect.top - paperRect.top) / paperScale.value - 4,
-    width: rect.width / paperScale.value + 8,
-    height: rect.height / paperScale.value + 8,
-  }
-}
-
-function selectTableAtPointer(event: PointerEvent) {
-  const target = event.target
-  if (!(target instanceof Element)) return
-  const wrapper = target.closest<HTMLElement>('.tableWrapper')
-  if (wrapper) {
-    const canvasItem = wrapper.closest('.canvas-item')
-    const currentEditor = canvasItem?.classList.contains('canvas-item-body') ? editor.value : undefined
-    if (currentEditor) selectTableCell(currentEditor, event.clientX, event.clientY)
-    showTableMenu(wrapper, currentEditor)
-  }
-}
-
-function selectCanvasTable(item: CanvasItem, currentEditor: Editor, wrapper: HTMLElement) {
-  activeCanvasItemId.value = item.id
-  activeCanvasTextEditor.value = currentEditor
-  showTableMenu(wrapper, currentEditor)
-}
-
-function activateBodyEditor() {
-  activeCanvasItemId.value = bodyCanvasId
-  activeCanvasTextEditor.value = null
-}
-
-function activateCanvasTextEditor(item: CanvasItem, currentEditor: Editor) {
-  activeCanvasItemId.value = item.id
-  activeCanvasTextEditor.value = currentEditor
-}
-
-function updateCanvasTableMenu(item: CanvasItem, currentEditor: Editor) {
-  if (activeCanvasItemId.value === item.id) updateTableMenu(currentEditor)
-}
-
-function deleteCanvasItem(item: CanvasItem) {
-  canvasItems.value = canvasItems.value.filter((entry) => entry.id !== item.id)
-  if (item.questionId) quizQuestions.value = quizQuestions.value.filter((question) => question.id !== item.questionId)
-  if (activeCanvasItemId.value === item.id) activeCanvasItemId.value = null
-  scheduleSave()
-}
-
-function removeQuizOption(question: QuizQuestion, optionIndex: number) {
-  if (question.options.length <= 2) return
-  question.options.splice(optionIndex, 1)
-  if (question.answerIndex === optionIndex) {
-    question.answerIndex = Math.min(optionIndex, question.options.length - 1)
-  } else if (question.answerIndex > optionIndex) {
-    question.answerIndex--
-  }
-}
-
-function createQuizQuestion(): QuizQuestion {
-  return {
-    id: crypto.randomUUID(),
-    type: 'choice',
-    prompt: '',
-    options: ['', '', '', ''],
-    answerIndex: 0,
-    answerText: '',
-    explanation: '',
-  }
-}
-
-function addQuizQuestion() {
-  const question = createQuizQuestion()
-  quizQuestions.value.push(question)
-  const item = createCanvasItem('quiz', { content: '', w: 300, h: 220 })
-  item.questionId = question.id
-  canvasItems.value.push(item)
-  activeCanvasItemId.value = item.id
-  scheduleSave()
-}
-
-function getQuizQuestion(item: CanvasItem) {
-  return quizQuestions.value.find((question) => question.id === item.questionId)
-}
-
-function getPreviewQuizResponse(question: QuizQuestion) {
-  previewQuizResponses.value[question.id] ??= { selectedIndex: null, text: '', submitted: false }
-  return previewQuizResponses.value[question.id]
-}
-
-function isPreviewQuizCorrect(question: QuizQuestion) {
-  const response = getPreviewQuizResponse(question)
-  return question.type === 'text'
-    ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
-    : response.selectedIndex === question.answerIndex
-}
-
-function submitPreviewQuiz(question: QuizQuestion) {
-  getPreviewQuizResponse(question).submitted = true
-}
-
-function applyBodyTextStyle(attribute: 'color' | 'fontSize', event: Event) {
-  const input = event.target as HTMLInputElement
-  if (attribute === 'fontSize') {
-    const fontSize = Number(input.value)
-    if (!Number.isFinite(fontSize) || fontSize < 1 || fontSize > 200) return
-    formattingEditor.value?.chain().focus().setMark('textStyle', { fontSize }).run()
-    return
-  }
-  formattingEditor.value?.chain().focus().setMark('textStyle', { color: input.value }).run()
-}
-
-function applyHighlightColor(event: Event) {
-  const color = (event.target as HTMLInputElement).value
-  highlightColor.value = color
-  const currentEditor = formattingEditor.value
-  currentEditor?.chain().focus().setMark('highlight', { color }).run()
-}
-
-function applyHighlight() {
-  const currentEditor = formattingEditor.value
-  if (!currentEditor) return
-  const command = currentEditor.chain().focus()
-  if (currentEditor.isActive('highlight')) command.unsetMark('highlight').run()
-  else command.setMark('highlight', { color: highlightColor.value }).run()
-}
-
-function getDrawingPoint(svg: SVGSVGElement, event: PointerEvent) {
-  const rect = svg.getBoundingClientRect()
-  return {
-    x: clamp((event.clientX - rect.left) / rect.width * 240, 0, 240),
-    y: clamp((event.clientY - rect.top) / rect.height * 120, 0, 120),
-  }
-}
-
-function startDrawing(item: CanvasItem, event: PointerEvent) {
-  const svg = event.currentTarget as SVGSVGElement
-  const point = getDrawingPoint(svg, event)
-  item.strokes ??= []
-  item.strokes.push([point])
-  activeDrawingId.value = item.id
-  event.preventDefault()
-}
-
-function getCanvasTitle() {
-  if (title.value.trim()) return title.value.trim()
-  const documentContent = editor.value?.getJSON().content ?? []
-  const heading = documentContent.find((node) => node.type === 'heading')
-  const headingText = heading?.content?.map((node) => node.text ?? '').join('').trim()
-  if (headingText) return headingText.slice(0, 100)
-  const text = editor.value?.getText().trim() ?? ''
-  return text.split(/\r?\n/).find(Boolean)?.slice(0, 80) || title.value.trim() || '無題の記事'
-}
-
-function getCanvasSummary() {
-  if (summary.value.trim()) return summary.value.trim()
-  if (!autoSummaryEnabled.value) return ''
-  const text = editor.value?.getText().trim() ?? ''
-  return text.split(/[。\n]/).find(Boolean)?.slice(0, 160) ?? ''
-}
-
-const SpeechBlockquote = Blockquote.extend({
-  addAttributes() {
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useEditor } from '@tiptap/vue-3';
+import { generateHTML } from '@tiptap/core';
+import { Blockquote } from '@tiptap/extension-blockquote';
+import Image from '@tiptap/extension-image';
+import TableRow from '@tiptap/extension-table-row';
+import StarterKit from '@tiptap/starter-kit';
+import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles';
+import { markdownToHtml } from '../lib/markdown';
+import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
+const route = useRoute();
+const router = useRouter();
+const articleId = computed(() => String(route.params.id ?? ''));
+const isNew = computed(() => route.path.endsWith('/new'));
+const title = ref('');
+const summary = ref('');
+const category = ref('テクノロジー');
+const tagsInput = ref('');
+const cover = ref('');
+const autoSummaryEnabled = ref(true);
+const authorId = ref();
+const preview = ref(false);
+const saving = ref(false);
+const saveMessage = ref('保存しました');
+const saveError = ref('');
+const publishedUrl = ref('');
+const ready = ref(false);
+const fileInput = ref();
+const coverInput = ref();
+const canvasItems = ref([]);
+const canvasSurface = ref();
+const paperSheet = ref();
+const paperScale = ref(1);
+const previewPaperScale = ref(1);
+const previewCanvasOffsetY = ref(0);
+const activeCanvasItemId = ref(null);
+const activeCanvasTextEditor = shallowRef(null);
+const selectedTableEditor = shallowRef(null);
+const tableMenuPosition = ref(null);
+const tableOutlinePosition = ref(null);
+const bodyCanvasPosition = ref({ x: 70, y: 290, w: 590, h: 430 });
+const quizQuestions = ref([]);
+const previewQuizResponses = ref({});
+const dragState = ref(null);
+const resizeState = ref(null);
+const activeDrawingId = ref(null);
+const highlightColor = ref('#fff176');
+let saveTimer;
+let paperResizeObserver;
+const bodyCanvasId = 'article-body-canvas';
+let selectedTableWrapper = null;
+function createCanvasItem(type, overrides = {}) {
+    const presets = {
+        text: { w: 240, h: 160, content: '## 要点\nここに文章を入力します。**Markdown** に対応しています。' },
+        quote: { w: 240, h: 120, content: '大切なメッセージを、読者がすぐ見える位置に置きましょう。' },
+        table: { w: 320, h: 180, content: '' },
+        image: { w: 260, h: 150, content: '画像要素はブロック編集から追加できます。' },
+        code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
+        shape: { w: 160, h: 110, content: '' },
+        drawing: { w: 240, h: 160, content: '', },
+        quiz: { w: 300, h: 220, content: '' },
+    };
+    const base = presets[type];
+    const paperRect = paperSheet.value?.getBoundingClientRect();
+    const contentRect = editor.value?.view.dom.getBoundingClientRect();
+    const defaultY = paperRect && contentRect
+        ? Math.max(260, (contentRect.bottom - paperRect.top) / paperScale.value + 24) + canvasItems.value.length * 22
+        : 260 + canvasItems.value.length * 42;
+    const defaultZIndex = Math.max(0, ...canvasItems.value.map((item) => item.zIndex ?? 0)) + 1;
     return {
-      kind: {
-        default: null,
-        parseHTML: (element) => element.getAttribute('data-kind'),
-        renderHTML: (attributes) => attributes.kind ? { 'data-kind': attributes.kind } : {},
-      },
+        id: crypto.randomUUID(),
+        type,
+        x: overrides.x ?? 24 + (canvasItems.value.length % 4) * 55,
+        y: overrides.y ?? defaultY,
+        w: overrides.w ?? base.w,
+        h: overrides.h ?? base.h,
+        zIndex: overrides.zIndex ?? defaultZIndex,
+        content: overrides.content ?? base.content,
+        color: overrides.color ?? (type === 'shape' ? '#b96c50' : type === 'drawing' ? '#7f6658' : undefined),
+        fillColor: overrides.fillColor,
+        strokeWidth: overrides.strokeWidth ?? (type === 'drawing' ? 3 : 2),
+        cornerRadius: overrides.cornerRadius ?? 8,
+        textColor: overrides.textColor ?? '#3a3430',
+        fontSize: overrides.fontSize ?? 14,
+        shape: overrides.shape,
+        strokes: overrides.strokes ?? (type === 'drawing' ? [] : undefined),
+    };
+}
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+function addCanvasItem(type, shape) {
+    const next = createCanvasItem(type, { shape });
+    canvasItems.value.push(next);
+    activeCanvasItemId.value = next.id;
+    scheduleSave();
+}
+function handlePointerMove(event) {
+    if (resizeState.value && canvasSurface.value) {
+        const state = resizeState.value;
+        const item = state.id === bodyCanvasId ? bodyCanvasPosition.value : canvasItems.value.find((entry) => entry.id === state.id);
+        if (!item)
+            return;
+        const dx = (event.clientX - state.startX) / paperScale.value;
+        const dy = (event.clientY - state.startY) / paperScale.value;
+        const east = state.corner.includes('e');
+        const south = state.corner.includes('s');
+        const west = state.corner.includes('w');
+        const north = state.corner.includes('n');
+        const nextWidth = Math.max(70, state.w + (east ? dx : west ? -dx : 0));
+        const nextHeight = Math.max(54, state.h + (south ? dy : north ? -dy : 0));
+        item.w = nextWidth;
+        item.h = nextHeight;
+        item.x = west ? Math.max(0, state.x + state.w - nextWidth) : state.x;
+        item.y = north ? Math.max(0, state.y + state.h - nextHeight) : state.y;
+        return;
     }
-  },
-})
-
+    if (activeDrawingId.value) {
+        const item = canvasItems.value.find((entry) => entry.id === activeDrawingId.value);
+        const svg = document.querySelector(`[data-drawing-id="${activeDrawingId.value}"]`);
+        const point = svg ? getDrawingPoint(svg, event) : null;
+        const strokes = item?.strokes;
+        const stroke = strokes?.[strokes.length - 1];
+        if (point && stroke)
+            stroke.push(point);
+        return;
+    }
+    if (!dragState.value || !canvasSurface.value)
+        return;
+    const rect = canvasSurface.value.getBoundingClientRect();
+    const item = dragState.value.id === bodyCanvasId
+        ? bodyCanvasPosition.value
+        : canvasItems.value.find((entry) => entry.id === dragState.value?.id);
+    if (!item)
+        return;
+    const nextX = clamp((event.clientX - rect.left) / paperScale.value - dragState.value.offsetX, 14, Math.max(14, rect.width / paperScale.value - item.w - 14));
+    const nextY = clamp((event.clientY - rect.top) / paperScale.value - dragState.value.offsetY, 14, Math.max(14, rect.height / paperScale.value - item.h - 14));
+    item.x = nextX;
+    item.y = nextY;
+}
+function stopPointerDrag(event) {
+    if (dragState.value || resizeState.value)
+        scheduleSave();
+    dragState.value = null;
+    resizeState.value = null;
+    activeDrawingId.value = null;
+}
+function handleCanvasOutsidePointerDown(event) {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('.canvas-item, .editor-toolbar, .sheet-item-tools, .table-floating-menu')) {
+        activeCanvasItemId.value = null;
+        activeCanvasTextEditor.value = null;
+        selectedTableWrapper?.classList.remove('table-selected');
+        selectedTableWrapper = null;
+        selectedTableEditor.value = null;
+        tableMenuPosition.value = null;
+        tableOutlinePosition.value = null;
+    }
+}
+function selectCanvasItem(item, event) {
+    activeCanvasItemId.value = item.id;
+    const canvasEditor = event.currentTarget instanceof HTMLElement
+        ? event.currentTarget.querySelector('.canvas-item-editor[contenteditable="true"]')
+        : null;
+    if (!canvasEditor)
+        activeCanvasTextEditor.value = null;
+    const target = event.target;
+    if (!(target instanceof Element) || target.closest('textarea, input, select, button, .canvas-resize-handle, .canvas-item-header, [contenteditable="true"]'))
+        return;
+    if (item.type === 'drawing')
+        return;
+    startCanvasDrag(item, event);
+}
+function startCanvasDrag(item, event) {
+    const rect = canvasSurface.value?.getBoundingClientRect();
+    if (!rect)
+        return;
+    activeCanvasItemId.value = item.id;
+    dragState.value = {
+        id: item.id,
+        offsetX: (event.clientX - rect.left) / paperScale.value - item.x,
+        offsetY: (event.clientY - rect.top) / paperScale.value - item.y,
+    };
+    event.preventDefault();
+}
+function startBodyCanvasDrag(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    activeCanvasItemId.value = bodyCanvasId;
+    activeCanvasTextEditor.value = null;
+    const rect = canvasSurface.value?.getBoundingClientRect();
+    if (!rect)
+        return;
+    dragState.value = {
+        id: bodyCanvasId,
+        offsetX: (event.clientX - rect.left) / paperScale.value - bodyCanvasPosition.value.x,
+        offsetY: (event.clientY - rect.top) / paperScale.value - bodyCanvasPosition.value.y,
+    };
+}
+function startCanvasResize(item, corner, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    activeCanvasItemId.value = item.id;
+    resizeState.value = {
+        id: item.id,
+        corner,
+        startX: event.clientX,
+        startY: event.clientY,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+    };
+}
+function startBodyCanvasResize(corner, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    activeCanvasItemId.value = bodyCanvasId;
+    resizeState.value = {
+        id: bodyCanvasId,
+        corner,
+        startX: event.clientX,
+        startY: event.clientY,
+        ...bodyCanvasPosition.value,
+    };
+}
+function updateTableMenu(currentEditor) {
+    const paperRect = paperSheet.value?.getBoundingClientRect();
+    if (!paperRect || !currentEditor.isActive('table')) {
+        selectedTableWrapper?.classList.remove('table-selected');
+        selectedTableWrapper = null;
+        selectedTableEditor.value = null;
+        tableMenuPosition.value = null;
+        tableOutlinePosition.value = null;
+        return;
+    }
+    const selectionNode = currentEditor.view.domAtPos(currentEditor.state.selection.from).node;
+    const selectionElement = selectionNode instanceof Element ? selectionNode : selectionNode.parentElement;
+    const wrapper = selectionElement?.closest('.tableWrapper');
+    if (!wrapper) {
+        selectedTableWrapper?.classList.remove('table-selected');
+        selectedTableWrapper = null;
+        selectedTableEditor.value = null;
+        tableMenuPosition.value = null;
+        tableOutlinePosition.value = null;
+        return;
+    }
+    showTableMenu(wrapper, currentEditor, paperRect);
+}
+function showTableMenu(wrapper, currentEditor, paperRect = paperSheet.value?.getBoundingClientRect()) {
+    if (!paperRect)
+        return;
+    selectedTableWrapper?.classList.remove('table-selected');
+    wrapper.classList.add('table-selected');
+    selectedTableWrapper = wrapper;
+    if (currentEditor)
+        selectedTableEditor.value = currentEditor;
+    const rect = wrapper.getBoundingClientRect();
+    tableMenuPosition.value = {
+        left: clamp((rect.left - paperRect.left) / paperScale.value, 8, Math.max(8, paperRect.width / paperScale.value - 290)),
+        top: clamp((rect.bottom - paperRect.top) / paperScale.value + 8, 8, Math.max(8, paperRect.height / paperScale.value - 44)),
+    };
+    tableOutlinePosition.value = {
+        left: (rect.left - paperRect.left) / paperScale.value - 4,
+        top: (rect.top - paperRect.top) / paperScale.value - 4,
+        width: rect.width / paperScale.value + 8,
+        height: rect.height / paperScale.value + 8,
+    };
+}
+function selectTableAtPointer(event) {
+    const target = event.target;
+    if (!(target instanceof Element))
+        return;
+    const wrapper = target.closest('.tableWrapper');
+    if (wrapper) {
+        const canvasItem = wrapper.closest('.canvas-item');
+        const currentEditor = canvasItem?.classList.contains('canvas-item-body') ? editor.value : undefined;
+        if (currentEditor)
+            selectTableCell(currentEditor, event.clientX, event.clientY);
+        showTableMenu(wrapper, currentEditor);
+    }
+}
+function selectCanvasTable(item, currentEditor, wrapper) {
+    activeCanvasItemId.value = item.id;
+    activeCanvasTextEditor.value = currentEditor;
+    showTableMenu(wrapper, currentEditor);
+}
+function activateBodyEditor() {
+    activeCanvasItemId.value = bodyCanvasId;
+    activeCanvasTextEditor.value = null;
+}
+function activateCanvasTextEditor(item, currentEditor) {
+    activeCanvasItemId.value = item.id;
+    activeCanvasTextEditor.value = currentEditor;
+}
+function updateCanvasTableMenu(item, currentEditor) {
+    if (activeCanvasItemId.value === item.id)
+        updateTableMenu(currentEditor);
+}
+function deleteCanvasItem(item) {
+    canvasItems.value = canvasItems.value.filter((entry) => entry.id !== item.id);
+    if (item.questionId)
+        quizQuestions.value = quizQuestions.value.filter((question) => question.id !== item.questionId);
+    if (activeCanvasItemId.value === item.id)
+        activeCanvasItemId.value = null;
+    scheduleSave();
+}
+function removeQuizOption(question, optionIndex) {
+    if (question.options.length <= 2)
+        return;
+    question.options.splice(optionIndex, 1);
+    if (question.answerIndex === optionIndex) {
+        question.answerIndex = Math.min(optionIndex, question.options.length - 1);
+    }
+    else if (question.answerIndex > optionIndex) {
+        question.answerIndex--;
+    }
+}
+function createQuizQuestion() {
+    return {
+        id: crypto.randomUUID(),
+        type: 'choice',
+        prompt: '',
+        options: ['', '', '', ''],
+        answerIndex: 0,
+        answerText: '',
+        explanation: '',
+    };
+}
+function addQuizQuestion() {
+    const question = createQuizQuestion();
+    quizQuestions.value.push(question);
+    const item = createCanvasItem('quiz', { content: '', w: 300, h: 220 });
+    item.questionId = question.id;
+    canvasItems.value.push(item);
+    activeCanvasItemId.value = item.id;
+    scheduleSave();
+}
+function getQuizQuestion(item) {
+    return quizQuestions.value.find((question) => question.id === item.questionId);
+}
+function getPreviewQuizResponse(question) {
+    previewQuizResponses.value[question.id] ??= { selectedIndex: null, text: '', submitted: false };
+    return previewQuizResponses.value[question.id];
+}
+function isPreviewQuizCorrect(question) {
+    const response = getPreviewQuizResponse(question);
+    return question.type === 'text'
+        ? response.text.trim().toLocaleLowerCase() === (question.answerText ?? '').trim().toLocaleLowerCase()
+        : response.selectedIndex === question.answerIndex;
+}
+function submitPreviewQuiz(question) {
+    getPreviewQuizResponse(question).submitted = true;
+}
+function applyBodyTextStyle(attribute, event) {
+    const input = event.target;
+    if (attribute === 'fontSize') {
+        const fontSize = Number(input.value);
+        if (!Number.isFinite(fontSize) || fontSize < 1 || fontSize > 200)
+            return;
+        formattingEditor.value?.chain().focus().setMark('textStyle', { fontSize }).run();
+        return;
+    }
+    formattingEditor.value?.chain().focus().setMark('textStyle', { color: input.value }).run();
+}
+function applyHighlightColor(event) {
+    const color = event.target.value;
+    highlightColor.value = color;
+    const currentEditor = formattingEditor.value;
+    currentEditor?.chain().focus().setMark('highlight', { color }).run();
+}
+function applyHighlight() {
+    const currentEditor = formattingEditor.value;
+    if (!currentEditor)
+        return;
+    const command = currentEditor.chain().focus();
+    if (currentEditor.isActive('highlight'))
+        command.unsetMark('highlight').run();
+    else
+        command.setMark('highlight', { color: highlightColor.value }).run();
+}
+function getDrawingPoint(svg, event) {
+    const rect = svg.getBoundingClientRect();
+    return {
+        x: clamp((event.clientX - rect.left) / rect.width * 240, 0, 240),
+        y: clamp((event.clientY - rect.top) / rect.height * 120, 0, 120),
+    };
+}
+function startDrawing(item, event) {
+    const svg = event.currentTarget;
+    const point = getDrawingPoint(svg, event);
+    item.strokes ??= [];
+    item.strokes.push([point]);
+    activeDrawingId.value = item.id;
+    event.preventDefault();
+}
+function getCanvasTitle() {
+    if (title.value.trim())
+        return title.value.trim();
+    const documentContent = editor.value?.getJSON().content ?? [];
+    const heading = documentContent.find((node) => node.type === 'heading');
+    const headingText = heading?.content?.map((node) => node.text ?? '').join('').trim();
+    if (headingText)
+        return headingText.slice(0, 100);
+    const text = editor.value?.getText().trim() ?? '';
+    return text.split(/\r?\n/).find(Boolean)?.slice(0, 80) || title.value.trim() || '無題の記事';
+}
+function getCanvasSummary() {
+    if (summary.value.trim())
+        return summary.value.trim();
+    if (!autoSummaryEnabled.value)
+        return '';
+    const text = editor.value?.getText().trim() ?? '';
+    return text.split(/[。\n]/).find(Boolean)?.slice(0, 160) ?? '';
+}
+const SpeechBlockquote = Blockquote.extend({
+    addAttributes() {
+        return {
+            kind: {
+                default: null,
+                parseHTML: (element) => element.getAttribute('data-kind'),
+                renderHTML: (attributes) => attributes.kind ? { 'data-kind': attributes.kind } : {},
+            },
+        };
+    },
+});
 const editor = useEditor({
-  content: '<p></p>',
-  extensions: [
-    StarterKit.configure({ blockquote: false }),
-    SpeechBlockquote,
-    HighlightMark,
-    TextStyleMark,
-    UnderlineMark,
-    Image.configure({ inline: false, allowBase64: true }),
-    EditableTable.configure({ resizable: true, allowTableNodeSelection: true, View: DraggableTableView }),
-    TableRow,
-    StyledTableHeader,
-    StyledTableCell,
-  ],
-  editorProps: {
-    attributes: {
-      class: 'canvas-body-editor',
-      'aria-label': '記事本文',
+    content: '<p></p>',
+    extensions: [
+        StarterKit.configure({ blockquote: false }),
+        SpeechBlockquote,
+        HighlightMark,
+        TextStyleMark,
+        UnderlineMark,
+        Image.configure({ inline: false, allowBase64: true }),
+        EditableTable.configure({ resizable: true, allowTableNodeSelection: true, View: DraggableTableView }),
+        TableRow,
+        StyledTableHeader,
+        StyledTableCell,
+    ],
+    editorProps: {
+        attributes: {
+            class: 'canvas-body-editor',
+            'aria-label': '記事本文',
+        },
     },
-  },
-  onFocus: activateBodyEditor,
-  onCreate: ({ editor: currentEditor }) => {
-    currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty)
-  },
-  onSelectionUpdate: ({ editor: currentEditor }) => {
-    if (activeCanvasItemId.value === bodyCanvasId) updateTableMenu(currentEditor)
-  },
-  onUpdate: ({ editor: currentEditor }) => {
-    currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty)
-    if (activeCanvasItemId.value === bodyCanvasId) updateTableMenu(currentEditor)
-    if (ready.value) scheduleSave()
-  },
-})
-
-const formattingEditor = computed(() => activeCanvasTextEditor.value ?? editor.value)
-const tags = computed(() => tagsInput.value.split(',').map((tag) => tag.trim()).filter(Boolean))
-const paperSheetHeight = computed(() => Math.max(
-  bodyCanvasPosition.value.y + bodyCanvasPosition.value.h + 58,
-  ...canvasItems.value.map((item) => item.y + item.h + 58),
-))
-const previewPaperHeight = computed(() => paperSheetHeight.value + previewCanvasOffsetY.value)
+    onFocus: activateBodyEditor,
+    onCreate: ({ editor: currentEditor }) => {
+        currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty);
+    },
+    onSelectionUpdate: ({ editor: currentEditor }) => {
+        if (activeCanvasItemId.value === bodyCanvasId)
+            updateTableMenu(currentEditor);
+    },
+    onUpdate: ({ editor: currentEditor }) => {
+        currentEditor.view.dom.classList.toggle('is-empty', currentEditor.isEmpty);
+        if (activeCanvasItemId.value === bodyCanvasId)
+            updateTableMenu(currentEditor);
+        if (ready.value)
+            scheduleSave();
+    },
+});
+const formattingEditor = computed(() => activeCanvasTextEditor.value ?? editor.value);
+const tags = computed(() => tagsInput.value.split(',').map((tag) => tag.trim()).filter(Boolean));
+const paperSheetHeight = computed(() => Math.max(bodyCanvasPosition.value.y + bodyCanvasPosition.value.h + 58, ...canvasItems.value.map((item) => item.y + item.h + 58)));
+const previewPaperHeight = computed(() => paperSheetHeight.value + previewCanvasOffsetY.value);
 const paperFrameStyle = computed(() => ({
-  '--paper-content-height': `${preview.value ? previewPaperHeight.value : paperSheetHeight.value}px`,
-  '--paper-scale': preview.value ? previewPaperScale.value : paperScale.value,
-  height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * (preview.value ? previewPaperScale.value : paperScale.value)}px`,
-}))
+    '--paper-content-height': `${preview.value ? previewPaperHeight.value : paperSheetHeight.value}px`,
+    '--paper-scale': preview.value ? previewPaperScale.value : paperScale.value,
+    height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * (preview.value ? previewPaperScale.value : paperScale.value)}px`,
+}));
 const previewBodyStyle = computed(() => ({
-   position: 'relative' as const,
-  width: '100%',
-  minHeight: 'auto',
-  padding: '0', 
-}))
+    position: 'relative',
+    width: '100%',
+    minHeight: 'auto',
+    padding: '0',
+}));
 const previewCanvasStyle = computed(() => ({
-  top: `${previewCanvasOffsetY.value}px`,
-}))
-
+    top: `${previewCanvasOffsetY.value}px`,
+}));
 function openPreview() {
-  previewPaperScale.value = paperScale.value
-  const sheetRect = paperSheet.value?.getBoundingClientRect()
-  const canvasRect = canvasSurface.value?.getBoundingClientRect()
-  if (sheetRect && canvasRect) {
-    previewCanvasOffsetY.value = (canvasRect.top - sheetRect.top) / paperScale.value
-  }
-  preview.value = true
+    previewPaperScale.value = paperScale.value;
+    const sheetRect = paperSheet.value?.getBoundingClientRect();
+    const canvasRect = canvasSurface.value?.getBoundingClientRect();
+    if (sheetRect && canvasRect) {
+        previewCanvasOffsetY.value = (canvasRect.top - sheetRect.top) / paperScale.value;
+    }
+    preview.value = true;
 }
-
-function canvasTextHtml(item: CanvasItem) {
-  return item.richContent
-    ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
-    : markdownToHtml(item.content)
+function canvasTextHtml(item) {
+    return item.richContent
+        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+        : markdownToHtml(item.content);
 }
-
 onMounted(async () => {
-  paperResizeObserver = new ResizeObserver(updatePaperScale)
-  observePaperSheet(paperSheet.value)
-  window.addEventListener('pointermove', handlePointerMove)
-  window.addEventListener('pointerup', stopPointerDrag)
-  window.addEventListener('mouseup', stopPointerDrag)
-  document.addEventListener('pointerdown', handleCanvasOutsidePointerDown, true)
-  try {
-    authorId.value = (await getCurrentUser())?.id ?? 'local-user'
-    if (!isNew.value) {
-      const existing = await getArticle(articleId.value)
-      if (existing) {
-        title.value = existing.title
-        summary.value = existing.summary
-        category.value = existing.category
-        tagsInput.value = existing.tags.join(', ')
-        cover.value = existing.cover
-        authorId.value = existing.authorId ?? authorId.value
-        if (existing.canvas?.body) bodyCanvasPosition.value = { ...existing.canvas.body }
-        canvasItems.value = (existing.canvas?.items ?? []).map((item, index) => ({
-          ...item,
-          zIndex: item.zIndex ?? index + 1,
-        }))
-        quizQuestions.value = existing.quizQuestions ?? []
-        for (const question of quizQuestions.value) {
-          if (!canvasItems.value.some((item) => item.questionId === question.id)) {
-            const item = createCanvasItem('quiz')
-            item.questionId = question.id
-            canvasItems.value.push(item)
-          }
+    paperResizeObserver = new ResizeObserver(updatePaperScale);
+    observePaperSheet(paperSheet.value);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopPointerDrag);
+    window.addEventListener('mouseup', stopPointerDrag);
+    document.addEventListener('pointerdown', handleCanvasOutsidePointerDown, true);
+    try {
+        authorId.value = (await getCurrentUser())?.id ?? 'local-user';
+        if (!isNew.value) {
+            const existing = await getArticle(articleId.value);
+            if (existing) {
+                title.value = existing.title;
+                summary.value = existing.summary;
+                category.value = existing.category;
+                tagsInput.value = existing.tags.join(', ');
+                cover.value = existing.cover;
+                authorId.value = existing.authorId ?? authorId.value;
+                if (existing.canvas?.body)
+                    bodyCanvasPosition.value = { ...existing.canvas.body };
+                canvasItems.value = (existing.canvas?.items ?? []).map((item, index) => ({
+                    ...item,
+                    zIndex: item.zIndex ?? index + 1,
+                }));
+                quizQuestions.value = existing.quizQuestions ?? [];
+                for (const question of quizQuestions.value) {
+                    if (!canvasItems.value.some((item) => item.questionId === question.id)) {
+                        const item = createCanvasItem('quiz');
+                        item.questionId = question.id;
+                        canvasItems.value.push(item);
+                    }
+                }
+                autoSummaryEnabled.value = existing.autoSummaryEnabled ?? true;
+                editor.value?.commands.setContent(existing.content);
+            }
+            else {
+                saveError.value = '記事が見つかりません。新しい記事として作成します。';
+            }
         }
-        autoSummaryEnabled.value = existing.autoSummaryEnabled ?? true
-        editor.value?.commands.setContent(existing.content as JSONContent)
-      } else {
-        saveError.value = '記事が見つかりません。新しい記事として作成します。'
-      }
-    } else {
-      const template = String(route.query.template ?? '')
-      if (template === 'explain') {
-        title.value = '〇〇のしくみをやさしく解説'
-        summary.value = 'この記事でわかることを、ひとことで紹介しましょう。'
-        editor.value?.commands.setContent('<h2>〇〇ってなに？</h2><p>まずは基本から説明してみましょう。</p><h2>どんな仕組み？</h2><p>身近なたとえを使って、順番に解説します。</p><blockquote data-kind="speech"><p>💬 ここで大事なポイントをまとめましょう。</p></blockquote><h2>まとめ</h2><p>覚えておきたいことを整理します。</p>')
-      } else if (template === 'guide') {
-        title.value = '手を動かして学ぶチュートリアル'
-        summary.value = '完成するものと、学べるポイントを紹介しましょう。'
-        editor.value?.commands.setContent('<h2>今回つくるもの</h2><p>完成イメージと必要な環境を書きましょう。</p><h2>準備</h2><p>必要なツールやセットアップ手順を説明します。</p><h2>実装してみよう</h2><pre><code>// ここにサンプルコードを追加\n</code></pre><h2>動作を確認する</h2><p>期待する結果や、つまずきやすい点を紹介しましょう。</p><h2>まとめ</h2><p>今回のポイントを振り返ります。</p>')
-      } else if (template === 'summary') {
-        title.value = '〇〇を図解でまとめる'
-        summary.value = '要点を短く紹介して、全体像を見せましょう。'
-        editor.value?.commands.setContent('<h2>まず全体像</h2><p>テーマの全体像を短く説明します。</p><h2>ポイント 1</h2><p>ひとつ目の要点と、その理由を書きます。</p><h2>ポイント 2</h2><p>ふたつ目の要点を、具体例と一緒に紹介します。</p><h2>ポイント 3</h2><p>最後の要点を整理します。</p><blockquote><p>✳ ここに大切なまとめを入れましょう。</p></blockquote>')
-      }
+        else {
+            const template = String(route.query.template ?? '');
+            if (template === 'explain') {
+                title.value = '〇〇のしくみをやさしく解説';
+                summary.value = 'この記事でわかることを、ひとことで紹介しましょう。';
+                editor.value?.commands.setContent('<h2>〇〇ってなに？</h2><p>まずは基本から説明してみましょう。</p><h2>どんな仕組み？</h2><p>身近なたとえを使って、順番に解説します。</p><blockquote data-kind="speech"><p>💬 ここで大事なポイントをまとめましょう。</p></blockquote><h2>まとめ</h2><p>覚えておきたいことを整理します。</p>');
+            }
+            else if (template === 'guide') {
+                title.value = '手を動かして学ぶチュートリアル';
+                summary.value = '完成するものと、学べるポイントを紹介しましょう。';
+                editor.value?.commands.setContent('<h2>今回つくるもの</h2><p>完成イメージと必要な環境を書きましょう。</p><h2>準備</h2><p>必要なツールやセットアップ手順を説明します。</p><h2>実装してみよう</h2><pre><code>// ここにサンプルコードを追加\n</code></pre><h2>動作を確認する</h2><p>期待する結果や、つまずきやすい点を紹介しましょう。</p><h2>まとめ</h2><p>今回のポイントを振り返ります。</p>');
+            }
+            else if (template === 'summary') {
+                title.value = '〇〇を図解でまとめる';
+                summary.value = '要点を短く紹介して、全体像を見せましょう。';
+                editor.value?.commands.setContent('<h2>まず全体像</h2><p>テーマの全体像を短く説明します。</p><h2>ポイント 1</h2><p>ひとつ目の要点と、その理由を書きます。</p><h2>ポイント 2</h2><p>ふたつ目の要点を、具体例と一緒に紹介します。</p><h2>ポイント 3</h2><p>最後の要点を整理します。</p><blockquote><p>✳ ここに大切なまとめを入れましょう。</p></blockquote>');
+            }
+        }
     }
-  } catch (error) {
-    saveError.value = error instanceof Error ? error.message : '記事を読み込めませんでした。'
-  }
-  ready.value = true
-})
-
+    catch (error) {
+        saveError.value = error instanceof Error ? error.message : '記事を読み込めませんでした。';
+    }
+    ready.value = true;
+});
 watch([title, summary, category, tagsInput, cover, autoSummaryEnabled], () => {
-  if (ready.value) scheduleSave()
-})
+    if (ready.value)
+        scheduleSave();
+});
 watch(canvasItems, () => {
-  if (ready.value) scheduleSave()
-}, { deep: true })
+    if (ready.value)
+        scheduleSave();
+}, { deep: true });
 watch(quizQuestions, () => {
-  if (ready.value) scheduleSave()
-}, { deep: true })
-function currentArticle(status: Article['status']): Article {
-  const content = editor.value?.getJSON() ?? { type: 'doc', content: [] }
-  const id = isNew.value ? (route.query.id ? String(route.query.id) : crypto.randomUUID()) : articleId.value
-  const publishedAt = status === 'published' ? new Date().toISOString() : undefined
-  const canvas = { mode: 'block' as const, items: canvasItems.value, body: bodyCanvasPosition.value }
-  return {
-    id,
-    slug: slugify(getCanvasTitle()),
-    title: getCanvasTitle(),
-    summary: getCanvasSummary(),
-    category: category.value,
-    tags: tags.value,
-    cover: cover.value,
-    content: {
-      ...(content as Record<string, unknown>),
-      canvas,
-      quizQuestions: quizQuestions.value,
-      autoSummaryEnabled: autoSummaryEnabled.value,
-    },
-    status,
-    updatedAt: new Date().toISOString(),
-    publishedAt,
-    authorId: authorId.value,
-    canvas,
-    quizQuestions: quizQuestions.value,
-    autoSummaryEnabled: autoSummaryEnabled.value,
-  }
+    if (ready.value)
+        scheduleSave();
+}, { deep: true });
+function currentArticle(status) {
+    const content = editor.value?.getJSON() ?? { type: 'doc', content: [] };
+    const id = isNew.value ? (route.query.id ? String(route.query.id) : crypto.randomUUID()) : articleId.value;
+    const publishedAt = status === 'published' ? new Date().toISOString() : undefined;
+    const canvas = { mode: 'block', items: canvasItems.value, body: bodyCanvasPosition.value };
+    return {
+        id,
+        slug: slugify(getCanvasTitle()),
+        title: getCanvasTitle(),
+        summary: getCanvasSummary(),
+        category: category.value,
+        tags: tags.value,
+        cover: cover.value,
+        content: {
+            ...content,
+            canvas,
+            quizQuestions: quizQuestions.value,
+            autoSummaryEnabled: autoSummaryEnabled.value,
+        },
+        status,
+        updatedAt: new Date().toISOString(),
+        publishedAt,
+        authorId: authorId.value,
+        canvas,
+        quizQuestions: quizQuestions.value,
+        autoSummaryEnabled: autoSummaryEnabled.value,
+    };
 }
-
 function scheduleSave() {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveMessage.value = '変更を保存中…'
-  saveTimer = setTimeout(() => { void saveDraft() }, 900)
+    if (saveTimer)
+        clearTimeout(saveTimer);
+    saveMessage.value = '変更を保存中…';
+    saveTimer = setTimeout(() => { void saveDraft(); }, 900);
 }
-
 async function saveDraft() {
-  if (saving.value || !ready.value) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saving.value = true
-  saveError.value = ''
-  try {
-    const saved = await saveArticle(currentArticle('draft'))
-    saveMessage.value = `保存済み · ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(new Date(saved.updatedAt))}`
-    if (isNew.value) {
-      await router.replace({ path: `/editor/${saved.id}` })
+    if (saving.value || !ready.value)
+        return;
+    if (saveTimer)
+        clearTimeout(saveTimer);
+    saving.value = true;
+    saveError.value = '';
+    try {
+        const saved = await saveArticle(currentArticle('draft'));
+        saveMessage.value = `保存済み · ${new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(new Date(saved.updatedAt))}`;
+        if (isNew.value) {
+            await router.replace({ path: `/editor/${saved.id}` });
+        }
     }
-  } catch (error) {
-    saveError.value = error instanceof Error ? error.message : '記事を保存できませんでした。'
-    saveMessage.value = '保存に失敗しました'
-  } finally {
-    saving.value = false
-  }
+    catch (error) {
+        saveError.value = error instanceof Error ? error.message : '記事を保存できませんでした。';
+        saveMessage.value = '保存に失敗しました';
+    }
+    finally {
+        saving.value = false;
+    }
 }
-
 async function publishArticle() {
-  saving.value = true
-  if (saveTimer) clearTimeout(saveTimer)
-  saveError.value = ''
-  try {
-    const article = await saveArticle(currentArticle('published'))
-    if (isNew.value) await router.replace({ path: `/editor/${article.id}` })
-    publishedUrl.value = `${window.location.origin}/articles/${article.slug}`
-    saveMessage.value = '記事を公開しました'
-  } catch (error) {
-    saveError.value = error instanceof Error ? error.message : '記事を公開できませんでした。'
-  } finally {
-    saving.value = false
-  }
+    saving.value = true;
+    if (saveTimer)
+        clearTimeout(saveTimer);
+    saveError.value = '';
+    try {
+        const article = await saveArticle(currentArticle('published'));
+        if (isNew.value)
+            await router.replace({ path: `/editor/${article.id}` });
+        publishedUrl.value = `${window.location.origin}/articles/${article.slug}`;
+        saveMessage.value = '記事を公開しました';
+    }
+    catch (error) {
+        saveError.value = error instanceof Error ? error.message : '記事を公開できませんでした。';
+    }
+    finally {
+        saving.value = false;
+    }
 }
-
-async function insertImage(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    saveError.value = '画像ファイルを選択してください。'
-    return
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    saveError.value = '画像は5MB以下のファイルを選択してください。'
-    return
-  }
-  saveError.value = ''
-  try {
-    const src = await uploadArticleImage(file)
-    editor.value?.chain().focus().setImage({ src, alt: file.name }).run()
-  } catch (error) {
-    saveError.value = error instanceof Error ? error.message : '画像をアップロードできませんでした。'
-  }
-  ;(event.target as HTMLInputElement).value = ''
+async function insertImage(event) {
+    const file = event.target.files?.[0];
+    if (!file)
+        return;
+    if (!file.type.startsWith('image/')) {
+        saveError.value = '画像ファイルを選択してください。';
+        return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        saveError.value = '画像は5MB以下のファイルを選択してください。';
+        return;
+    }
+    saveError.value = '';
+    try {
+        const src = await uploadArticleImage(file);
+        editor.value?.chain().focus().setImage({ src, alt: file.name }).run();
+    }
+    catch (error) {
+        saveError.value = error instanceof Error ? error.message : '画像をアップロードできませんでした。';
+    }
+    ;
+    event.target.value = '';
 }
-
-async function setCoverImage(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
-    saveError.value = '画像ファイルを選択してください。'
-    return
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    saveError.value = '画像は5MB以下のファイルを選択してください。'
-    return
-  }
-  try {
-    cover.value = await uploadArticleImage(file)
-    saveError.value = ''
-  } catch (error) {
-    saveError.value = error instanceof Error ? error.message : '画像をアップロードできませんでした。'
-  }
-  ;(event.target as HTMLInputElement).value = ''
+async function setCoverImage(event) {
+    const file = event.target.files?.[0];
+    if (!file)
+        return;
+    if (!file.type.startsWith('image/')) {
+        saveError.value = '画像ファイルを選択してください。';
+        return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        saveError.value = '画像は5MB以下のファイルを選択してください。';
+        return;
+    }
+    try {
+        cover.value = await uploadArticleImage(file);
+        saveError.value = '';
+    }
+    catch (error) {
+        saveError.value = error instanceof Error ? error.message : '画像をアップロードできませんでした。';
+    }
+    ;
+    event.target.value = '';
 }
-
 function insertSpeechBubble() {
-  formattingEditor.value?.chain().focus().insertContent('<blockquote data-kind="speech"><p>💬 ここに吹き出しの内容を書いてください。</p></blockquote><p></p>').run()
+    formattingEditor.value?.chain().focus().insertContent('<blockquote data-kind="speech"><p>💬 ここに吹き出しの内容を書いてください。</p></blockquote><p></p>').run();
 }
-
 function addTable() {
-  const item = createCanvasItem('table')
-  item.richContent = {
-    type: 'doc',
-    content: [{
-      type: 'table',
-      content: Array.from({ length: 3 }, (_, row) => ({
-        type: 'tableRow',
-        content: Array.from({ length: 3 }, () => ({
-          type: row === 0 ? 'tableHeader' : 'tableCell',
-          content: [{ type: 'paragraph' }],
-        })),
-      })),
-    }],
-  }
-  canvasItems.value.push(item)
-  activeCanvasItemId.value = item.id
-  activeCanvasTextEditor.value = null
-  scheduleSave()
+    const item = createCanvasItem('table');
+    item.richContent = {
+        type: 'doc',
+        content: [{
+                type: 'table',
+                content: Array.from({ length: 3 }, (_, row) => ({
+                    type: 'tableRow',
+                    content: Array.from({ length: 3 }, () => ({
+                        type: row === 0 ? 'tableHeader' : 'tableCell',
+                        content: [{ type: 'paragraph' }],
+                    })),
+                })),
+            }],
+    };
+    canvasItems.value.push(item);
+    activeCanvasItemId.value = item.id;
+    activeCanvasTextEditor.value = null;
+    scheduleSave();
 }
-
 function previewHtml() {
-  return editor.value?.isEmpty ? '' : editor.value?.getHTML() ?? ''
+    return editor.value?.isEmpty ? '' : editor.value?.getHTML() ?? '';
 }
-
 function updatePaperScale() {
-  if (preview.value) return
-  const parent = paperSheet.value?.parentElement
-  if (!parent) {
-    paperScale.value = 1
-    return
-  }
-  const style = getComputedStyle(parent)
-  const availableWidth = parent.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
-  paperScale.value = Math.min(1, Math.max(0.01, availableWidth / 730))
+    if (preview.value)
+        return;
+    const parent = paperSheet.value?.parentElement;
+    if (!parent) {
+        paperScale.value = 1;
+        return;
+    }
+    const style = getComputedStyle(parent);
+    const availableWidth = parent.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+    paperScale.value = Math.min(1, Math.max(0.01, availableWidth / 730));
 }
-
-function observePaperSheet(sheet?: HTMLElement) {
-  paperResizeObserver?.disconnect()
-  if (!sheet?.parentElement || !paperResizeObserver) return
-  paperResizeObserver.observe(sheet.parentElement)
-  updatePaperScale()
+function observePaperSheet(sheet) {
+    paperResizeObserver?.disconnect();
+    if (!sheet?.parentElement || !paperResizeObserver)
+        return;
+    paperResizeObserver.observe(sheet.parentElement);
+    updatePaperScale();
 }
-
-watch(paperSheet, observePaperSheet, { flush: 'post' })
-
+watch(paperSheet, observePaperSheet, { flush: 'post' });
 async function copyPublishedUrl() {
-  try {
-    await navigator.clipboard.writeText(publishedUrl.value)
-    saveMessage.value = '公開URLをコピーしました'
-  } catch (error) {
-    console.error('公開URLをコピーできませんでした。', error)
-  }
+    try {
+        await navigator.clipboard.writeText(publishedUrl.value);
+        saveMessage.value = '公開URLをコピーしました';
+    }
+    catch (error) {
+        console.error('公開URLをコピーできませんでした。', error);
+    }
 }
-
 onBeforeUnmount(() => {
-  paperResizeObserver?.disconnect()
-  if (saveTimer) clearTimeout(saveTimer)
-  window.removeEventListener('pointermove', handlePointerMove)
-  window.removeEventListener('pointerup', stopPointerDrag)
-  window.removeEventListener('mouseup', stopPointerDrag)
-  document.removeEventListener('pointerdown', handleCanvasOutsidePointerDown, true)
-  editor.value?.destroy()
-})
+    paperResizeObserver?.disconnect();
+    if (saveTimer)
+        clearTimeout(saveTimer);
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', stopPointerDrag);
+    window.removeEventListener('mouseup', stopPointerDrag);
+    document.removeEventListener('pointerdown', handleCanvasOutsidePointerDown, true);
+    editor.value?.destroy();
+});
 </script>
 
 <template>
@@ -797,7 +791,7 @@ onBeforeUnmount(() => {
             <div class="editor-toolbar">
               <button title="元に戻す" :disabled="!formattingEditor?.can().undo()" @mousedown.prevent @click="formattingEditor?.chain().focus().undo().run()"><Undo2 :size="17" /></button>
               <button title="やり直す" :disabled="!formattingEditor?.can().redo()" @mousedown.prevent @click="formattingEditor?.chain().focus().redo().run()"><Redo2 :size="17" /></button><span class="toolbar-separator"></span>
-              <select aria-label="テキストスタイル" @change="(event) => { const val = (event.target as HTMLSelectElement).value; if (val === 'p') formattingEditor?.chain().focus().setParagraph().run(); else formattingEditor?.chain().focus().toggleHeading({ level: Number(val) as 1 | 2 | 3 }).run() }"><option value="p">本文</option><option value="1">見出し 1</option><option value="2">見出し 2</option><option value="3">見出し 3</option></select>
+              <select aria-label="テキストスタイル" @change="(event) => { const val = (event.target).value; if (val === 'p') formattingEditor?.chain().focus().setParagraph().run(); else formattingEditor?.chain().focus().toggleHeading({ level: Number(val) }).run() }"><option value="p">本文</option><option value="1">見出し 1</option><option value="2">見出し 2</option><option value="3">見出し 3</option></select>
               <span class="toolbar-separator"></span>
               <button title="太字" :class="{ selected: formattingEditor?.isActive('bold') }" @mousedown.prevent @click="formattingEditor?.chain().focus().toggleBold().run()"><Bold :size="17" /></button>
               <button title="斜体" :class="{ selected: formattingEditor?.isActive('italic') }" @mousedown.prevent @click="formattingEditor?.chain().focus().toggleItalic().run()"><Italic :size="17" /></button>
@@ -854,8 +848,8 @@ onBeforeUnmount(() => {
                   <button type="button" title="列を左に追加" @pointerdown.prevent @click="selectedTableEditor?.chain().focus().addColumnBefore().run()">列＋左</button>
                   <button type="button" title="列を右に追加" @pointerdown.prevent @click="selectedTableEditor?.chain().focus().addColumnAfter().run()">列＋右</button>
                   <button type="button" title="選択列を削除" @pointerdown.prevent @click="selectedTableEditor?.chain().focus().deleteColumn().run()">列－</button>
-                  <label title="選択セルの塗りつぶし色">塗<input type="color" value="#ffffff" @pointerdown.stop @input="selectedTableEditor?.chain().focus().setCellAttribute('backgroundColor', ($event.target as HTMLInputElement).value).run()" /></label>
-                  <label title="選択セルの枠線の太さ">枠<input type="number" min="0" max="20" value="1" @pointerdown.stop @change="selectedTableEditor?.chain().focus().setCellAttribute('borderWidth', Number(($event.target as HTMLInputElement).value)).run()" />px</label>
+                  <label title="選択セルの塗りつぶし色">塗<input type="color" value="#ffffff" @pointerdown.stop @input="selectedTableEditor?.chain().focus().setCellAttribute('backgroundColor', ($event.target).value).run()" /></label>
+                  <label title="選択セルの枠線の太さ">枠<input type="number" min="0" max="20" value="1" @pointerdown.stop @change="selectedTableEditor?.chain().focus().setCellAttribute('borderWidth', Number(($event.target).value)).run()" />px</label>
                   <button type="button" title="表を削除" @pointerdown.prevent @click="selectedTableEditor?.chain().focus().deleteTable().run()">表－</button>
                 </div>
                 <div v-for="(item, index) in canvasItems" :key="item.id" class="canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`, { selected: activeCanvasItemId === item.id }]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1 }" @pointerdown="selectCanvasItem(item, $event)">
@@ -865,13 +859,13 @@ onBeforeUnmount(() => {
                       <select v-model="item.shape" aria-label="図形の種類" @pointerdown.stop>
                         <option value="rectangle">四角</option><option value="ellipse">円</option><option value="triangle">三角</option><option value="arrow">矢印</option><option value="line">線</option>
                       </select>
-                      <label title="枠線の色"><span>枠</span><input :value="item.color || '#b96c50'" type="color" aria-label="図形の枠線の色" @input="item.color = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
-                      <label title="塗りつぶし"><span>塗り</span><input :value="item.fillColor || '#ffffff'" type="color" aria-label="図形の塗りつぶし色" @input="item.fillColor = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
+                      <label title="枠線の色"><span>枠</span><input :value="item.color || '#b96c50'" type="color" aria-label="図形の枠線の色" @input="item.color = ($event.target).value" @pointerdown.stop /></label>
+                      <label title="塗りつぶし"><span>塗り</span><input :value="item.fillColor || '#ffffff'" type="color" aria-label="図形の塗りつぶし色" @input="item.fillColor = ($event.target).value" @pointerdown.stop /></label>
                       <label title="枠線の太さ"><span>太さ</span><input v-model.number="item.strokeWidth" type="number" min="0" max="30" aria-label="枠線の太さ" @pointerdown.stop /></label>
                       <label title="角の丸さ"><span>角</span><input v-model.number="item.cornerRadius" type="number" min="0" max="100" aria-label="角の丸さ" @pointerdown.stop /></label>
                     </template>
                     <template v-else-if="item.type === 'text' || item.type === 'quote' || item.type === 'code'">
-                      <label title="文字色"><span>文字</span><input :value="item.textColor || '#3a3430'" type="color" aria-label="テキストボックスの文字色" @input="item.textColor = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
+                      <label title="文字色"><span>文字</span><input :value="item.textColor || '#3a3430'" type="color" aria-label="テキストボックスの文字色" @input="item.textColor = ($event.target).value" @pointerdown.stop /></label>
                       <label title="文字サイズ（px）"><span>サイズ</span><input v-model.number="item.fontSize" type="number" min="1" max="200" aria-label="テキストボックスの文字サイズ（ピクセル）" @pointerdown.stop /></label>
                     </template>
                     <template v-else-if="item.type === 'drawing'">
@@ -897,20 +891,20 @@ onBeforeUnmount(() => {
                     <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
                   </svg>
                   <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="canvas-quiz-editor" @pointerdown.stop="activeCanvasItemId = item.id">
-                    <select v-model="getQuizQuestion(item)!.type" aria-label="クイズの回答形式" @pointerdown.stop>
+                    <select v-model="getQuizQuestion(item).type" aria-label="クイズの回答形式" @pointerdown.stop>
                       <option value="choice">選択肢式</option><option value="text">短答式</option>
                     </select>
-                    <textarea v-model="getQuizQuestion(item)!.prompt" rows="2" placeholder="問題文を入力" aria-label="クイズの問題文"></textarea>
-                    <template v-if="getQuizQuestion(item)!.type === 'choice'">
-                      <label v-for="(option, optionIndex) in getQuizQuestion(item)!.options" :key="optionIndex" class="canvas-quiz-option">
-                        <input v-model="getQuizQuestion(item)!.answerIndex" type="radio" :name="`canvas-answer-${getQuizQuestion(item)!.id}`" :value="optionIndex" :aria-label="`選択肢${optionIndex + 1}を正解にする`" />
-                        <input v-model="getQuizQuestion(item)!.options[optionIndex]" :placeholder="`選択肢 ${optionIndex + 1}`" />
-                        <button type="button" class="canvas-quiz-remove-option" :disabled="getQuizQuestion(item)!.options.length <= 2" :aria-label="`選択肢${optionIndex + 1}を削除`" @click="removeQuizOption(getQuizQuestion(item)!, optionIndex)">×</button>
+                    <textarea v-model="getQuizQuestion(item).prompt" rows="2" placeholder="問題文を入力" aria-label="クイズの問題文"></textarea>
+                    <template v-if="getQuizQuestion(item).type === 'choice'">
+                      <label v-for="(option, optionIndex) in getQuizQuestion(item).options" :key="optionIndex" class="canvas-quiz-option">
+                        <input v-model="getQuizQuestion(item).answerIndex" type="radio" :name="`canvas-answer-${getQuizQuestion(item).id}`" :value="optionIndex" :aria-label="`選択肢${optionIndex + 1}を正解にする`" />
+                        <input v-model="getQuizQuestion(item).options[optionIndex]" :placeholder="`選択肢 ${optionIndex + 1}`" />
+                        <button type="button" class="canvas-quiz-remove-option" :disabled="getQuizQuestion(item).options.length <= 2" :aria-label="`選択肢${optionIndex + 1}を削除`" @click="removeQuizOption(getQuizQuestion(item), optionIndex)">×</button>
                       </label>
-                      <button type="button" class="canvas-quiz-add-option" @click="getQuizQuestion(item)!.options.push('')">選択肢を追加</button>
+                      <button type="button" class="canvas-quiz-add-option" @click="getQuizQuestion(item).options.push('')">選択肢を追加</button>
                     </template>
-                    <input v-else v-model="getQuizQuestion(item)!.answerText" class="canvas-quiz-short-answer" placeholder="答えを入力" />
-                    <input v-model="getQuizQuestion(item)!.explanation" class="canvas-quiz-explanation" placeholder="解説（任意）" />
+                    <input v-else v-model="getQuizQuestion(item).answerText" class="canvas-quiz-short-answer" placeholder="答えを入力" />
+                    <input v-model="getQuizQuestion(item).explanation" class="canvas-quiz-explanation" placeholder="解説（任意）" />
                   </div>
                   <template v-if="activeCanvasItemId === item.id">
                     <span v-for="corner in ['nw', 'ne', 'sw', 'se']" :key="corner" class="canvas-resize-handle" :class="`resize-${corner}`" :aria-label="`サイズ変更 ${corner}`" @pointerdown="startCanvasResize(item, corner, $event)"></span>
@@ -953,25 +947,25 @@ onBeforeUnmount(() => {
                 <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
               </svg>
               <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="reader-canvas-quiz">
-                <span>クイズ · {{ getQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>
-                <p>{{ getQuizQuestion(item)!.prompt || '問題文' }}</p>
-                <div v-if="getQuizQuestion(item)!.type !== 'text'" class="quiz-options">
+                <span>クイズ · {{ getQuizQuestion(item).type === 'text' ? '短答式' : '選択肢式' }}</span>
+                <p>{{ getQuizQuestion(item).prompt || '問題文' }}</p>
+                <div v-if="getQuizQuestion(item).type !== 'text'" class="quiz-options">
                   <button
-                    v-for="(option, index) in getQuizQuestion(item)!.options"
+                    v-for="(option, index) in getQuizQuestion(item).options"
                     :key="index"
-                    :class="{ selected: getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === index, correct: getPreviewQuizResponse(getQuizQuestion(item)!).submitted && index === getQuizQuestion(item)!.answerIndex, wrong: getPreviewQuizResponse(getQuizQuestion(item)!).submitted && getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === index && index !== getQuizQuestion(item)!.answerIndex }"
-                    :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted"
-                    @click="getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex = index"
+                    :class="{ selected: getPreviewQuizResponse(getQuizQuestion(item)).selectedIndex === index, correct: getPreviewQuizResponse(getQuizQuestion(item)).submitted && index === getQuizQuestion(item).answerIndex, wrong: getPreviewQuizResponse(getQuizQuestion(item)).submitted && getPreviewQuizResponse(getQuizQuestion(item)).selectedIndex === index && index !== getQuizQuestion(item).answerIndex }"
+                    :disabled="getPreviewQuizResponse(getQuizQuestion(item)).submitted"
+                    @click="getPreviewQuizResponse(getQuizQuestion(item)).selectedIndex = index"
                   >{{ option || `選択肢 ${index + 1}` }}</button>
                 </div>
-                <input v-else v-model="getPreviewQuizResponse(getQuizQuestion(item)!).text" class="quiz-answer-input" placeholder="回答を入力してください" :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted" />
-                <button class="button button-primary quiz-submit" :disabled="getPreviewQuizResponse(getQuizQuestion(item)!).submitted || (getQuizQuestion(item)!.type === 'text' ? !getPreviewQuizResponse(getQuizQuestion(item)!).text.trim() : getPreviewQuizResponse(getQuizQuestion(item)!).selectedIndex === null)" @click="submitPreviewQuiz(getQuizQuestion(item)!)">
-                  {{ getPreviewQuizResponse(getQuizQuestion(item)!).submitted ? '提出済み' : '提出' }}
+                <input v-else v-model="getPreviewQuizResponse(getQuizQuestion(item)).text" class="quiz-answer-input" placeholder="回答を入力してください" :disabled="getPreviewQuizResponse(getQuizQuestion(item)).submitted" />
+                <button class="button button-primary quiz-submit" :disabled="getPreviewQuizResponse(getQuizQuestion(item)).submitted || (getQuizQuestion(item).type === 'text' ? !getPreviewQuizResponse(getQuizQuestion(item)).text.trim() : getPreviewQuizResponse(getQuizQuestion(item)).selectedIndex === null)" @click="submitPreviewQuiz(getQuizQuestion(item))">
+                  {{ getPreviewQuizResponse(getQuizQuestion(item)).submitted ? '提出済み' : '提出' }}
                 </button>
-                <div v-if="getPreviewQuizResponse(getQuizQuestion(item)!).submitted" class="quiz-feedback">
-                  <strong>{{ isPreviewQuizCorrect(getQuizQuestion(item)!) ? '正解です！' : '不正解です。' }}</strong>
-                  <span>答え：{{ getQuizQuestion(item)!.type === 'text' ? getQuizQuestion(item)!.answerText : getQuizQuestion(item)!.options[getQuizQuestion(item)!.answerIndex] }}</span>
-                  <span>{{ getQuizQuestion(item)!.explanation }}</span>
+                <div v-if="getPreviewQuizResponse(getQuizQuestion(item)).submitted" class="quiz-feedback">
+                  <strong>{{ isPreviewQuizCorrect(getQuizQuestion(item)) ? '正解です！' : '不正解です。' }}</strong>
+                  <span>答え：{{ getQuizQuestion(item).type === 'text' ? getQuizQuestion(item).answerText : getQuizQuestion(item).options[getQuizQuestion(item).answerIndex] }}</span>
+                  <span>{{ getQuizQuestion(item).explanation }}</span>
                 </div>
               </div>
             </div>
