@@ -8,14 +8,14 @@ import Image from '@tiptap/extension-image'
 import TableRow from '@tiptap/extension-table-row'
 import StarterKit from '@tiptap/starter-kit'
 import {
-  ArrowLeft, ArrowRight, Bold, BookOpen, Check, ChevronDown, Code2, Eye, ImagePlus, Italic, Underline,
+  ArrowLeft, ArrowRight, Bold, BookOpen, Check, ChevronDown, Code2, Eye, Highlighter, ImagePlus, Italic, Underline,
   List, ListOrdered, MessageSquareQuote, Plus, Redo2,
   Save, Sparkles, Table2, Undo2, X,
 } from 'lucide-vue-next'
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
 import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
-import { TextStyleMark, UnderlineMark } from '../lib/textStyle'
+import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
 import type { Article, CanvasItem, QuizQuestion } from '../types'
 import CanvasTextEditor from '../components/CanvasTextEditor.vue'
 
@@ -42,6 +42,7 @@ const canvasItems = ref<CanvasItem[]>([])
 const canvasSurface = ref<HTMLElement>()
 const paperSheet = ref<HTMLElement>()
 const paperScale = ref(1)
+const previewPaperScale = ref(1)
 const previewCanvasOffsetY = ref(0)
 const activeCanvasItemId = ref<string | null>(null)
 const activeCanvasTextEditor = shallowRef<Editor | null>(null)
@@ -54,6 +55,7 @@ const previewQuizResponses = ref<Record<string, { selectedIndex: number | null; 
 const dragState = ref<{ id: string; offsetX: number; offsetY: number } | null>(null)
 const resizeState = ref<{ id: string; corner: string; startX: number; startY: number; x: number; y: number; w: number; h: number } | null>(null)
 const activeDrawingId = ref<string | null>(null)
+const highlightColor = ref('#fff176')
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let paperResizeObserver: ResizeObserver | undefined
 const bodyCanvasId = 'article-body-canvas'
@@ -86,9 +88,9 @@ function createCanvasItem(type: CanvasItem['type'], overrides: Partial<CanvasIte
     h: overrides.h ?? base.h,
     zIndex: overrides.zIndex ?? defaultZIndex,
     content: overrides.content ?? base.content,
-    color: overrides.color ?? (type === 'shape' ? '#b96c50' : undefined),
+    color: overrides.color ?? (type === 'shape' ? '#b96c50' : type === 'drawing' ? '#7f6658' : undefined),
     fillColor: overrides.fillColor,
-    strokeWidth: overrides.strokeWidth ?? 2,
+    strokeWidth: overrides.strokeWidth ?? (type === 'drawing' ? 3 : 2),
     cornerRadius: overrides.cornerRadius ?? 8,
     textColor: overrides.textColor ?? '#3a3430',
     fontSize: overrides.fontSize ?? 14,
@@ -380,6 +382,21 @@ function applyBodyTextStyle(attribute: 'color' | 'fontSize', event: Event) {
   formattingEditor.value?.chain().focus().setMark('textStyle', { color: input.value }).run()
 }
 
+function applyHighlightColor(event: Event) {
+  const color = (event.target as HTMLInputElement).value
+  highlightColor.value = color
+  const currentEditor = formattingEditor.value
+  currentEditor?.chain().focus().setMark('highlight', { color }).run()
+}
+
+function applyHighlight() {
+  const currentEditor = formattingEditor.value
+  if (!currentEditor) return
+  const command = currentEditor.chain().focus()
+  if (currentEditor.isActive('highlight')) command.unsetMark('highlight').run()
+  else command.setMark('highlight', { color: highlightColor.value }).run()
+}
+
 function getDrawingPoint(svg: SVGSVGElement, event: PointerEvent) {
   const rect = svg.getBoundingClientRect()
   return {
@@ -431,6 +448,7 @@ const editor = useEditor({
   extensions: [
     StarterKit.configure({ blockquote: false }),
     SpeechBlockquote,
+    HighlightMark,
     TextStyleMark,
     UnderlineMark,
     Image.configure({ inline: false, allowBase64: true }),
@@ -468,8 +486,8 @@ const paperSheetHeight = computed(() => Math.max(
 const previewPaperHeight = computed(() => paperSheetHeight.value + previewCanvasOffsetY.value)
 const paperFrameStyle = computed(() => ({
   '--paper-content-height': `${preview.value ? previewPaperHeight.value : paperSheetHeight.value}px`,
-  '--paper-scale': paperScale.value,
-  height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * paperScale.value}px`,
+  '--paper-scale': preview.value ? previewPaperScale.value : paperScale.value,
+  height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * (preview.value ? previewPaperScale.value : paperScale.value)}px`,
 }))
 const previewBodyStyle = computed(() => ({
   position: 'absolute' as const,
@@ -484,6 +502,7 @@ const previewCanvasStyle = computed(() => ({
 }))
 
 function openPreview() {
+  previewPaperScale.value = paperScale.value
   const sheetRect = paperSheet.value?.getBoundingClientRect()
   const canvasRect = canvasSurface.value?.getBoundingClientRect()
   if (sheetRect && canvasRect) {
@@ -494,7 +513,7 @@ function openPreview() {
 
 function canvasTextHtml(item: CanvasItem) {
   return item.richContent
-    ? generateHTML(item.richContent, [StarterKit, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+    ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
     : markdownToHtml(item.content)
 }
 
@@ -706,6 +725,7 @@ function previewHtml() {
 }
 
 function updatePaperScale() {
+  if (preview.value) return
   const parent = paperSheet.value?.parentElement
   if (!parent) {
     paperScale.value = 1
@@ -783,6 +803,8 @@ onBeforeUnmount(() => {
               <span class="toolbar-separator"></span>
               <button title="太字" :class="{ selected: formattingEditor?.isActive('bold') }" @mousedown.prevent @click="formattingEditor?.chain().focus().toggleBold().run()"><Bold :size="17" /></button>
               <button title="斜体" :class="{ selected: formattingEditor?.isActive('italic') }" @mousedown.prevent @click="formattingEditor?.chain().focus().toggleItalic().run()"><Italic :size="17" /></button>
+              <button title="蛍光ペン" :class="{ selected: formattingEditor?.isActive('highlight') }" @mousedown.prevent @click="applyHighlight"><Highlighter :size="17" /></button>
+              <label class="text-style-control" title="蛍光ペンの色"><span>蛍光色</span><input v-model="highlightColor" type="color" aria-label="蛍光ペンの色" @input="applyHighlightColor" /></label>
               <button title="下線" :class="{ selected: formattingEditor?.isActive('underline') }" @mousedown.prevent @click="formattingEditor?.chain().focus().toggleUnderline().run()"><Underline :size="17" /></button>
               <label class="text-style-control" title="本文の文字色"><span>文字色</span><input type="color" aria-label="本文の文字色" value="#46413c" @input="applyBodyTextStyle('color', $event)" /></label>
               <label class="text-style-control" title="文字サイズ（px）"><span>文字サイズ</span><input type="number" min="1" max="200" value="16" aria-label="文字サイズ（ピクセル）" @change="applyBodyTextStyle('fontSize', $event)" /><span>px</span></label>
@@ -854,6 +876,10 @@ onBeforeUnmount(() => {
                       <label title="文字色"><span>文字</span><input :value="item.textColor || '#3a3430'" type="color" aria-label="テキストボックスの文字色" @input="item.textColor = ($event.target as HTMLInputElement).value" @pointerdown.stop /></label>
                       <label title="文字サイズ（px）"><span>サイズ</span><input v-model.number="item.fontSize" type="number" min="1" max="200" aria-label="テキストボックスの文字サイズ（ピクセル）" @pointerdown.stop /></label>
                     </template>
+                    <template v-else-if="item.type === 'drawing'">
+                      <label title="手書きのインク色"><span>インク</span><input v-model="item.color" type="color" aria-label="手書きのインク色" @pointerdown.stop /></label>
+                      <label title="手書きの太さ（px）"><span>太さ</span><input v-model.number="item.strokeWidth" type="number" min="0.5" max="30" step="0.5" aria-label="手書きのインクの太さ（ピクセル）" @pointerdown.stop /></label>
+                    </template>
                     <label title="重なり順"><span>前後</span><input v-model.number="item.zIndex" type="number" step="1" aria-label="要素の重なり順" @pointerdown.stop /></label>
                     <button type="button" class="canvas-item-delete" @pointerdown.stop @click="deleteCanvasItem(item)">削除</button>
                   </div>
@@ -870,7 +896,7 @@ onBeforeUnmount(() => {
                     <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
                   </svg>
                   <svg v-else-if="item.type === 'drawing'" class="canvas-drawing" :data-drawing-id="item.id" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス" @pointerdown="startDrawing(item, $event)">
-                    <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
+                    <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
                   </svg>
                   <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="canvas-quiz-editor" @pointerdown.stop="activeCanvasItemId = item.id">
                     <select v-model="getQuizQuestion(item)!.type" aria-label="クイズの回答形式" @pointerdown.stop>
@@ -913,8 +939,8 @@ onBeforeUnmount(() => {
           <div v-if="cover" class="reader-cover"><img :src="cover" alt="" /></div>
           <div class="reader-content" :style="previewBodyStyle" v-html="previewHtml()"></div>
           <div v-if="canvasItems.length" class="preview-canvas" :style="previewCanvasStyle">
-            <div v-for="(item, index) in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-              <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? undefined : 'canvas-item-editor reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
+            <div v-for="(item, index) in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
+              <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? 'canvas-item-editor canvas-rich-text' : 'canvas-item-editor canvas-rich-text reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
               <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
               <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
               <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content || '画像' }}</div>
@@ -926,7 +952,7 @@ onBeforeUnmount(() => {
                 <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
               </svg>
               <svg v-else-if="item.type === 'drawing'" class="reader-canvas-drawing" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書き">
-                <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
+                <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
               </svg>
               <div v-else-if="item.type === 'quiz' && getQuizQuestion(item)" class="reader-canvas-quiz">
                 <span>クイズ · {{ getQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>

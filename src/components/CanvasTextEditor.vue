@@ -7,7 +7,7 @@ import Image from '@tiptap/extension-image'
 import TableRow from '@tiptap/extension-table-row'
 import { markdownToHtml } from '../lib/markdown'
 import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
-import { TextStyleMark, UnderlineMark } from '../lib/textStyle'
+import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
 import type { CanvasItem } from '../types'
 
 const props = defineProps<{
@@ -23,6 +23,7 @@ const editor = useEditor({
   content: props.item.richContent ?? markdownToHtml(props.item.content),
   extensions: [
     StarterKit,
+    HighlightMark,
     TextStyleMark,
     UnderlineMark,
     Image.configure({ inline: false, allowBase64: true }),

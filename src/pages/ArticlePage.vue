@@ -9,7 +9,7 @@ import TableRow from '@tiptap/extension-table-row'
 import { getArticle, listArticles } from '../lib/articles'
 import { markdownToHtml } from '../lib/markdown'
 import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions'
-import { TextStyleMark, UnderlineMark } from '../lib/textStyle'
+import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle'
 import type { Article, CanvasItem, CommentEntry, GlossaryEntry, QuizQuestion } from '../types'
 
 const route = useRoute()
@@ -42,7 +42,7 @@ const quizQuestions = ref<QuizQuestion[]>([])
 const quizResponses = ref<Record<string, { selectedIndex: number | null; text: string; submitted: boolean }>>({})
 
 const articleId = computed(() => String(route.params.slug))
-const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '')
+const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '')
 const articleCanvasItems = computed(() => {
   const items = [...(article.value?.canvas?.items ?? [])]
   const placedQuestions = new Set(items.map((item) => item.questionId).filter((id): id is string => Boolean(id)))
@@ -94,7 +94,7 @@ function getPublicQuizQuestion(item: CanvasItem) {
 
 function getCanvasTextHtml(item: CanvasItem) {
   return item.richContent
-    ? generateHTML(item.richContent, [StarterKit, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+    ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
     : markdownToHtml(item.content)
 }
 
@@ -237,8 +237,8 @@ function isQuizCorrect(question: QuizQuestion) {
 
       <div class="reader-content" :style="articleBodyStyle" v-html="contentHtml"></div>
       <div v-if="articleCanvasItems.length" class="reader-canvas">
-      <div v-for="(item, index) in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-        <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? undefined : 'reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="getCanvasTextHtml(item)"></div>
+      <div v-for="(item, index) in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
+        <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? 'canvas-rich-text' : 'canvas-rich-text reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="getCanvasTextHtml(item)"></div>
         <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
         <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
         <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content }}</div>
@@ -250,7 +250,7 @@ function isQuizCorrect(question: QuizQuestion) {
           <g v-else><line x1="12" y1="50" x2="138" y2="50" /><polyline points="116,28 140,50 116,72" /></g>
         </svg>
         <svg v-else-if="item.type === 'drawing'" class="reader-canvas-drawing" viewBox="0 0 240 120" preserveAspectRatio="none" aria-label="手書きボックス">
-          <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" />
+          <polyline v-for="(stroke, index) in item.strokes ?? []" :key="index" :points="stroke.map((point) => `${point.x},${point.y}`).join(' ')" :style="{ stroke: item.color || '#7f6658', strokeWidth: item.strokeWidth ?? 3 }" />
         </svg>
         <div v-if="item.type === 'quiz' && getPublicQuizQuestion(item)" class="reader-canvas-quiz">
           <span>クイズ · {{ getPublicQuizQuestion(item)!.type === 'text' ? '短答式' : '選択肢式' }}</span>

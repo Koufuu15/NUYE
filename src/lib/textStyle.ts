@@ -46,3 +46,40 @@ export const UnderlineMark = Mark.create({
     }
   },
 })
+
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    highlight: {
+      toggleHighlight: (attributes: { color: string }) => ReturnType
+    }
+  }
+}
+
+export const HighlightMark = Mark.create({
+  name: 'highlight',
+  addAttributes() {
+    return {
+      color: {
+        default: '#fff176',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-highlight-color') || element.style.backgroundColor || '#fff176',
+        renderHTML: (attributes) => {
+          const color = attributes.color
+          return typeof color === 'string' && /^#[\da-f]{6}$/i.test(color)
+            ? { 'data-highlight-color': color, style: `background-color: ${color}` }
+            : {}
+        },
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'mark' }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['mark', mergeAttributes(HTMLAttributes), 0]
+  },
+  addCommands() {
+    return {
+      toggleHighlight: (attributes) => ({ commands }) => commands.toggleMark(this.name, attributes),
+    }
+  },
+})
