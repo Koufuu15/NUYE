@@ -1148,7 +1148,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   font-size: 10px;
 }
 .reader-content {
-  padding: 15px 0 25px;
+  padding: 5px 0 25px;
   color: #423e39;
   font-size: 15px;
   line-height: 2.05;
@@ -2060,12 +2060,25 @@ textarea.canvas-item-editor::placeholder {
   border-collapse: collapse;
   font-size: .9em;
 }
+.reader-canvas-item.canvas-item-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .9em;
+}
 .canvas-markdown-preview th, .canvas-markdown-preview td {
   padding: 3px 5px;
   border: 1px solid #d9cfc5;
   text-align: left;
 }
+.reader-canvas-item.canvas-item-table th, .reader-canvas-item.canvas-item-table td {
+  padding: 3px 5px;
+  border: 1px solid #d9cfc5;
+  text-align: left;
+}
 .canvas-markdown-preview th {
+  background: #f5f0e9;
+}
+.reader-canvas-item.canvas-item-table th {
   background: #f5f0e9;
 }
 .canvas-markdown-preview hr {
@@ -3412,6 +3425,13 @@ textarea.canvas-item-editor::placeholder {
   background: transparent;
   box-shadow: none;
 }
+.reader-canvas .canvas-item-table, .preview-canvas .canvas-item-table {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
 .reader-canvas .canvas-item-shape {
   padding: 1px;
   border: 0;
@@ -3506,7 +3526,7 @@ textarea.canvas-item-editor::placeholder {
   overflow: visible;
   pointer-events: auto;
 }
-.preview-canvas .canvas-item-text, .preview-canvas .canvas-item-quote .canvas-item-table{
+.preview-canvas .canvas-item-text, .preview-canvas .canvas-item-quote {
   padding: 9px;
   border: 0;
   border-radius: 0;

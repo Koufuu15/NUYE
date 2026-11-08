@@ -42,6 +42,7 @@ const canvasItems = ref<CanvasItem[]>([])
 const canvasSurface = ref<HTMLElement>()
 const paperSheet = ref<HTMLElement>()
 const paperScale = ref(1)
+const previewCanvasOffsetY = ref(0)
 const activeCanvasItemId = ref<string | null>(null)
 const activeCanvasTextEditor = shallowRef<Editor | null>(null)
 const selectedTableEditor = shallowRef<Editor | null>(null)
@@ -464,19 +465,32 @@ const paperSheetHeight = computed(() => Math.max(
   bodyCanvasPosition.value.y + bodyCanvasPosition.value.h + 58,
   ...canvasItems.value.map((item) => item.y + item.h + 58),
 ))
+const previewPaperHeight = computed(() => paperSheetHeight.value + previewCanvasOffsetY.value)
 const paperFrameStyle = computed(() => ({
-  '--paper-content-height': `${paperSheetHeight.value}px`,
+  '--paper-content-height': `${preview.value ? previewPaperHeight.value : paperSheetHeight.value}px`,
   '--paper-scale': paperScale.value,
-  height: `${Math.max(830, paperSheetHeight.value) * paperScale.value}px`,
+  height: `${Math.max(830, preview.value ? previewPaperHeight.value : paperSheetHeight.value) * paperScale.value}px`,
 }))
 const previewBodyStyle = computed(() => ({
   position: 'absolute' as const,
   left: `${bodyCanvasPosition.value.x}px`,
-  top: `${bodyCanvasPosition.value.y}px`,
+  top: `${previewCanvasOffsetY.value + bodyCanvasPosition.value.y}px`,
   width: `${bodyCanvasPosition.value.w}px`,
   minHeight: `${bodyCanvasPosition.value.h}px`,
   padding: '0',
 }))
+const previewCanvasStyle = computed(() => ({
+  top: `${previewCanvasOffsetY.value}px`,
+}))
+
+function openPreview() {
+  const sheetRect = paperSheet.value?.getBoundingClientRect()
+  const canvasRect = canvasSurface.value?.getBoundingClientRect()
+  if (sheetRect && canvasRect) {
+    previewCanvasOffsetY.value = (canvasRect.top - sheetRect.top) / paperScale.value
+  }
+  preview.value = true
+}
 
 function canvasTextHtml(item: CanvasItem) {
   return item.richContent
@@ -736,7 +750,7 @@ onBeforeUnmount(() => {
     <header class="editor-topbar">
       <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><span class="brand-mark"><BookOpen :size="17" /></span><b>Manga<span class="brand-accent">Press</span></b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
       <div class="editor-save-status" :class="{ 'save-failed': saveError }"><span class="save-dot"></span>{{ saveError || saveMessage }}</div>
-      <div class="editor-top-actions"><button class="editor-preview-button" @click="preview = true"><Eye :size="15" />プレビュー</button><button class="button button-publish" :disabled="saving" @click="publishArticle">公開する <ArrowRight :size="15" /></button></div>
+      <div class="editor-top-actions"><button class="editor-preview-button" @click="openPreview"><Eye :size="15" />プレビュー</button><button class="button button-publish" :disabled="saving" @click="publishArticle">公開する <ArrowRight :size="15" /></button></div>
     </header>
 
     <div class="editor-workspace">
@@ -898,9 +912,9 @@ onBeforeUnmount(() => {
           <div class="paper-rule"></div>
           <div v-if="cover" class="reader-cover"><img :src="cover" alt="" /></div>
           <div class="reader-content" :style="previewBodyStyle" v-html="previewHtml()"></div>
-          <div v-if="canvasItems.length" class="preview-canvas">
+          <div v-if="canvasItems.length" class="preview-canvas" :style="previewCanvasStyle">
             <div v-for="(item, index) in canvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-              <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" class="canvas-item-editor reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
+              <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? undefined : 'canvas-item-editor reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="canvasTextHtml(item)"></div>
               <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
               <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
               <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content || '画像' }}</div>

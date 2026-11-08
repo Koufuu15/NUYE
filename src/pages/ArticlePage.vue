@@ -238,7 +238,7 @@ function isQuizCorrect(question: QuizQuestion) {
       <div class="reader-content" :style="articleBodyStyle" v-html="contentHtml"></div>
       <div v-if="articleCanvasItems.length" class="reader-canvas">
       <div v-for="(item, index) in articleCanvasItems" :key="item.id" class="reader-canvas-item" :class="[`canvas-item-${item.type}`, `canvas-shape-${item.shape ?? 'rectangle'}`]" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px`, zIndex: item.zIndex ?? index + 1, maxWidth: '100%', color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }">
-        <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" class="reader-canvas-markdown canvas-markdown-preview" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="getCanvasTextHtml(item)"></div>
+        <div v-if="item.type === 'text' || item.type === 'quote' || item.type === 'table'" :class="item.type === 'table' ? undefined : 'reader-canvas-markdown canvas-markdown-preview'" :style="{ color: item.textColor || '#3a3430', fontSize: `${item.fontSize ?? 14}px` }" v-html="getCanvasTextHtml(item)"></div>
         <pre v-else-if="item.type === 'code'">{{ item.content }}</pre>
         <img v-else-if="item.type === 'image' && item.content.startsWith('data:image/')" class="canvas-image-preview" :src="item.content" alt="" />
         <div v-else-if="item.type === 'image'" class="reader-canvas-placeholder">{{ item.content }}</div>
