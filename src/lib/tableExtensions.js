@@ -1,6 +1,7 @@
 import Table, { TableView } from '@tiptap/extension-table';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
+import TableRow from '@tiptap/extension-table-row'
 import { CellSelection } from '@tiptap/pm/tables';
 function cellStyleAttributes() {
     return {
@@ -54,6 +55,33 @@ export const StyledTableHeader = TableHeader.extend({
         return { ...this.parent?.(), ...cellStyleAttributes() };
     },
 });
+export const StyledTableRow = TableRow.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+
+      height: {
+        default: null,
+
+        parseHTML: (element) => {
+          const height = Number.parseFloat(element.style.height)
+
+          return Number.isFinite(height) && height > 0
+            ? height
+            : null
+        },
+
+        renderHTML: (attributes) => {
+          const height = Number(attributes.height)
+
+          return Number.isFinite(height) && height > 0
+            ? { style: `height: ${height}px` }
+            : {}
+        },
+      },
+    }
+  },
+})
 export function selectTableCell(editor, clientX, clientY) {
     const position = editor.view.posAtCoords({ left: clientX, top: clientY })?.pos;
     if (position === undefined)

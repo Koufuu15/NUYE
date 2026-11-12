@@ -34,7 +34,7 @@ onMounted(async () => {
         <div class="visual-wash"></div>
         <div class="float-label label-top"><Sparkles :size="14" /> VISUAL EDITOR</div>
         <div class="editor-preview">
-          <div class="preview-top"><span></span><span></span><span></span><b>Untitled — MangaPress</b></div>
+          <div class="preview-top"><span></span><span></span><span></span><b>Untitled — NUYE</b></div>
           <div class="preview-content">
             <div class="preview-title">APIってなに？<br /><i>3分でわかるしくみ</i></div>
             <div class="preview-speech"><span>💡</span><b>アプリ同士の「窓口」だよ！</b></div>
@@ -49,7 +49,7 @@ onMounted(async () => {
       <a href="#discover" class="scroll-cue"><ArrowDown :size="14" /> SCROLL TO EXPLORE</a>
     </section>
 
-    <section class="feature-strip" aria-label="MangaPressの特徴">
+    <section class="feature-strip" aria-label="NUYEの特徴">
       <div><span class="feature-icon"><PenLine :size="17" /></span><span><b>かんたんに書ける</b><small>操作はボタンを選ぶだけ</small></span></div>
       <div><span class="feature-icon"><Blocks :size="17" /></span><span><b>自由に組み合わせる</b><small>文章・画像・コード・吹き出し</small></span></div>
       <div><span class="feature-icon"><Sparkles :size="17" /></span><span><b>伝わる記事ができる</b><small>あなたらしい表現で届けよう</small></span></div>

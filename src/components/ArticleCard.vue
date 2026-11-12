@@ -32,7 +32,7 @@ function formattedDate(value) {
       </div>
       <p>{{ article.summary || 'この記事の概要はまだありません。' }}</p>
       <div class="card-meta">
-        <span class="avatar avatar-tiny">M</span><span>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</span>
+        <span class="avatar avatar-tiny">M</span><span>{{ article.authorId === 'NUYE' ? 'NUYE編集部' : 'あなた' }}</span>
         <span class="meta-dot">·</span><Clock3 :size="13" /><time>{{ formattedDate(article.publishedAt || article.updatedAt) }}</time>
         <span class="meta-read">5分で読める</span>
       </div>

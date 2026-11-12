@@ -69,7 +69,7 @@ function toggleGlossaryTerm(term) {
     <div v-if="isMe" class="personal-library">
       <div v-if="!loading && !filtered.length" class="empty-state personal-articles-empty"><span class="empty-icon">✳</span><h2>まだ記事がありません</h2><p>あなたの知識を、最初の記事にしてみませんか？</p><RouterLink to="/editor/new" class="button button-primary">記事を書く</RouterLink></div>
       <section class="personal-library-section">
-        <div class="personal-library-heading"><h2>用語辞典</h2><span>{{ glossaryEntries.length }} 件</span></div>
+        <div class="personal-library-heading"><h2>用語辞典</h2><span>{{ glossaryEntries?.length ?? 0 }} 件</span></div>
         <ul class="personal-glossary-list">
           <li v-for="entry in glossaryEntries" :key="entry.term">
             <div><h3>{{ entry.term }}</h3><p>{{ entry.definition }}</p></div>

@@ -4,10 +4,9 @@ import { useRoute } from 'vue-router';
 import { generateHTML } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import TableRow from '@tiptap/extension-table-row';
 import { getArticle, listArticles } from '../lib/articles';
 import { markdownToHtml } from '../lib/markdown';
-import { EditableTable, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import { EditableTable, StyledTableCell, StyledTableHeader, StyledTableRow } from '../lib/tableExtensions';
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
 import { recordRecentArticle } from '../lib/userLibrary';
 const route = useRoute();
@@ -27,7 +26,7 @@ const related = ref([]);
 const quizQuestions = ref([]);
 const quizResponses = ref({});
 const articleId = computed(() => String(route.params.slug));
-const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell]) : '');
+const contentHtml = computed(() => article.value ? generateHTML(article.value.content, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, StyledTableRow, StyledTableHeader, StyledTableCell]) : '');
 const articleCanvasItems = computed(() => {
     const items = [...(article.value?.canvas?.items ?? [])];
     const placedQuestions = new Set(items.map((item) => item.questionId).filter((id) => Boolean(id)));
@@ -74,7 +73,7 @@ function getPublicQuizQuestion(item) {
 }
 function getCanvasTextHtml(item) {
     return item.richContent
-        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, StyledTableRow, StyledTableHeader, StyledTableCell])
         : markdownToHtml(item.content);
 }
 onMounted(async () => {
@@ -90,7 +89,7 @@ onMounted(async () => {
             { selectedIndex: null, text: '', submitted: false },
         ]));
         recordRecentArticle(article.value);
-        const storedComments = JSON.parse(localStorage.getItem(`mangapress.comments.${article.value.id}`) ?? 'null');
+        const storedComments = JSON.parse(localStorage.getItem(`NUYE.comments.${article.value.id}`) ?? 'null');
         if (storedComments && storedComments.length)
             comments.value = storedComments;
         const allArticles = await listArticles();
@@ -134,7 +133,7 @@ function addComment() {
         body: commentDraft.value.trim(),
         createdAt: new Date().toISOString(),
     });
-    localStorage.setItem(`mangapress.comments.${article.value?.id ?? articleId.value}`, JSON.stringify(comments.value));
+    localStorage.setItem(`NUYE.comments.${article.value?.id ?? articleId.value}`, JSON.stringify(comments.value));
     commentDraft.value = '';
 }
 function submitQuiz(question) {
@@ -215,7 +214,7 @@ function isQuizCorrect(question) {
     <div class="reader-author">
       <span class="avatar">M</span>
       <span>
-        <b>{{ article.authorId === 'mangapress' ? 'MangaPress編集部' : 'あなた' }}</b>
+        <b>{{ article.authorId === 'NUYE' ? 'NUYE編集部' : 'あなた' }}</b>
         <small>{{ new Intl.DateTimeFormat('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(article.publishedAt || article.updatedAt)) }}に公開</small>
       </span>
       <button class="follow-button" :class="{ active: followed }" @click="toggleFollow">{{ followed ? 'フォロー中' : 'フォロー' }}</button>

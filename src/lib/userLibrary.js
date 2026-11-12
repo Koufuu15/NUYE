@@ -4,8 +4,8 @@ export const glossaryEntries = [
     { term: 'API', definition: 'アプリと外部サービスのやり取りをつなぐ窓口です。' },
     { term: 'SSR', definition: 'サーバー側でHTMLを生成して返すレンダリング方式です。' },
 ];
-const HISTORY_KEY = 'mangapress.history.v1';
-const GLOSSARY_KEY = 'mangapress.saved-glossary.v1';
+const HISTORY_KEY = 'NUYE.history.v1';
+const GLOSSARY_KEY = 'NUYE.saved-glossary.v1';
 export function getRecentArticles() {
     const stored = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]');
     if (!Array.isArray(stored))

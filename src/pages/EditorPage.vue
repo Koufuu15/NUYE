@@ -1,16 +1,47 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useEditor } from '@tiptap/vue-3';
+import { useEditor, EditorContent } from '@tiptap/vue-3';
 import { generateHTML } from '@tiptap/core';
+import logoUrl from '../assets/NUYE_logo.ico';
 import { Blockquote } from '@tiptap/extension-blockquote';
 import Image from '@tiptap/extension-image';
-import TableRow from '@tiptap/extension-table-row';
 import StarterKit from '@tiptap/starter-kit';
+import {
+    ArrowLeft,
+    Eye,
+    ArrowRight,
+    ChevronDown,
+    Sparkles,
+    ImagePlus,
+    Save,
+    Undo2,
+    Redo2,
+    Bold,
+    Italic,
+    Highlighter,
+    Underline,
+    List,
+    ListOrdered,
+    MessageSquareQuote,
+    Code2,
+    Plus,
+    Table2,
+    X,
+    Check,
+} from 'lucide-vue-next';
 import { getArticle, getCurrentUser, saveArticle, slugify, uploadArticleImage } from '../lib/articles';
 import { markdownToHtml } from '../lib/markdown';
-import { DraggableTableView, EditableTable, selectTableCell, StyledTableCell, StyledTableHeader } from '../lib/tableExtensions';
+import {
+  DraggableTableView,
+  EditableTable,
+  selectTableCell,
+  StyledTableCell,
+  StyledTableHeader,
+  StyledTableRow,
+} from '../lib/tableExtensions'
 import { HighlightMark, TextStyleMark, UnderlineMark } from '../lib/textStyle';
+import CanvasTextEditor from '../components/CanvasTextEditor.vue';
 const route = useRoute();
 const router = useRouter();
 const articleId = computed(() => String(route.params.id ?? ''));
@@ -58,7 +89,7 @@ function createCanvasItem(type, overrides = {}) {
         quote: { w: 240, h: 120, content: '大切なメッセージを、読者がすぐ見える位置に置きましょう。' },
         table: { w: 320, h: 180, content: '' },
         image: { w: 260, h: 150, content: '画像要素はブロック編集から追加できます。' },
-        code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
+        code: { w: 260, h: 150, content: 'const article = "NUYE";\nconsole.log(article);' },
         shape: { w: 160, h: 110, content: '' },
         drawing: { w: 240, h: 160, content: '', },
         quiz: { w: 300, h: 220, content: '' },
@@ -437,7 +468,7 @@ const editor = useEditor({
         UnderlineMark,
         Image.configure({ inline: false, allowBase64: true }),
         EditableTable.configure({ resizable: true, allowTableNodeSelection: true, View: DraggableTableView }),
-        TableRow,
+        StyledTableRow,
         StyledTableHeader,
         StyledTableCell,
     ],
@@ -492,7 +523,7 @@ function openPreview() {
 }
 function canvasTextHtml(item) {
     return item.richContent
-        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, TableRow, StyledTableHeader, StyledTableCell])
+        ? generateHTML(item.richContent, [StarterKit, HighlightMark, TextStyleMark, UnderlineMark, Image, EditableTable, StyledTableRow, StyledTableHeader, StyledTableCell])
         : markdownToHtml(item.content);
 }
 onMounted(async () => {
@@ -760,7 +791,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="editor-app">
     <header class="editor-topbar">
-      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><span class="brand-mark"><BookOpen :size="17" /></span><b>Manga<span class="brand-accent">Press</span></b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
+      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><img class="brand-mark" :src="logoUrl" alt="" /><b>NU<span class="brand-accent">Y</span>E</b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
       <div class="editor-save-status" :class="{ 'save-failed': saveError }"><span class="save-dot"></span>{{ saveError || saveMessage }}</div>
       <div class="editor-top-actions"><button class="editor-preview-button" @click="openPreview"><Eye :size="15" />プレビュー</button><button class="button button-publish" :disabled="saving" @click="publishArticle">公開する <ArrowRight :size="15" /></button></div>
     </header>
