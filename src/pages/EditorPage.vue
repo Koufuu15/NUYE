@@ -3,11 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { useRoute, useRouter } from 'vue-router';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import { generateHTML } from '@tiptap/core';
+import logoUrl from '../assets/NUYE_logo.ico';
 import { Blockquote } from '@tiptap/extension-blockquote';
 import Image from '@tiptap/extension-image';
 import StarterKit from '@tiptap/starter-kit';
 import {
-    BookOpen,
     ArrowLeft,
     Eye,
     ArrowRight,
@@ -791,7 +791,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="editor-app">
     <header class="editor-topbar">
-      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><span class="brand-mark"><BookOpen :size="17" /></span><b>NU<span class="brand-accent">Y</span>E</b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
+      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><img class="brand-mark" :src="logoUrl" alt="" /><b>NU<span class="brand-accent">Y</span>E</b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
       <div class="editor-save-status" :class="{ 'save-failed': saveError }"><span class="save-dot"></span>{{ saveError || saveMessage }}</div>
       <div class="editor-top-actions"><button class="editor-preview-button" @click="openPreview"><Eye :size="15" />プレビュー</button><button class="button button-publish" :disabled="saving" @click="publishArticle">公開する <ArrowRight :size="15" /></button></div>
     </header>

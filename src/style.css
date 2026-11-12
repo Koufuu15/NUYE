@@ -73,12 +73,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .brand-mark {
   width: 31px;
   height: 31px;
-  border-radius: 10px 10px 10px 4px;
-  background: #c76f51;
-  color: #fffaf5;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  object-fit: contain;
 }
 .brand-accent {
   color: var(--terra);
@@ -207,7 +202,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .footer-brand .brand-mark {
   width: 25px;
   height: 25px;
-  border-radius: 8px 8px 8px 3px;
 }
 .footer-note {
   margin-left: auto;
@@ -1665,7 +1659,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .editor-brand .brand-mark {
   width: 27px;
   height: 27px;
-  border-radius: 8px 8px 8px 3px;
 }
 .top-divider {
   height: 20px;

@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { hasSupabaseConfig, signIn, signUp } from '../lib/articles';
+import logoUrl from '../assets/NUYE_logo.ico';
 const router = useRouter();
 const mode = ref('signup');
 const name = ref('');
@@ -48,7 +49,7 @@ async function submit() {
 <template>
   <section class="auth-page">
     <div class="auth-illustration">
-      <RouterLink to="/" class="brand auth-brand"><span class="brand-mark"><BookOpen :size="18" /></span><span>NU<span class="brand-accent">Y</span>E</span></RouterLink>
+      <RouterLink to="/" class="brand auth-brand"><img class="brand-mark" :src="logoUrl" alt="" /><span>NU<span class="brand-accent">Y</span>E</span></RouterLink>
       <div class="auth-art">
         <span class="auth-art-sun">✳</span><div class="auth-art-sheet"><span>YOUR IDEAS</span><strong>知識を、<br /><em>物語に。</em></strong><i>✳</i><small>DRAW · WRITE · SHARE</small></div>
         <span class="auth-art-note">ひらめきを<br />かたちにしよう。</span>

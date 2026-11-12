@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { getCurrentUser } from './lib/articles';
+import logoUrl from './assets/NUYE_logo.ico';
 const route = useRoute();
 const user = ref(null);
 const isEditor = computed(() => route.path.startsWith('/editor/'));
@@ -20,7 +21,7 @@ watch(() => route.fullPath, async () => {
     <header v-if="!isEditor" class="site-header">
       <div class="header-inner">
         <RouterLink to="/" class="brand" aria-label="NUYE トップ">
-          <span class="brand-mark"><BookOpen :size="18" stroke-width="2.2" /></span>
+          <img class="brand-mark" :src="logoUrl" alt="" />
           <span>NU<span class="brand-accent">Y</span>E</span>
         </RouterLink>
         <nav class="main-nav" aria-label="メインナビゲーション">
@@ -44,7 +45,7 @@ watch(() => route.fullPath, async () => {
       <RouterView />
     </main>
     <footer v-if="!isEditor" class="site-footer">
-      <RouterLink to="/" class="brand footer-brand"><span class="brand-mark"><BookOpen :size="16" /></span><span>NU<span class="brand-accent">Y</span>E</span></RouterLink>
+      <RouterLink to="/" class="brand footer-brand"><img class="brand-mark" :src="logoUrl" alt="" /><span>NU<span class="brand-accent">Y</span>E</span></RouterLink>
       <span>知識を、伝わるかたちに。</span>
       <span class="footer-note"><Sparkles :size="14" /> Built for curious minds</span>
     </footer>
