@@ -1,19 +1,19 @@
 import { supabase } from './supabase';
-const STORAGE_KEY = 'mangapress.articles.v1';
-const SESSION_KEY = 'mangapress.local-user.v1';
+const STORAGE_KEY = 'NUYE.articles.v1';
+const SESSION_KEY = 'NUYE.local-user.v1';
 const demoArticles = [
     {
         id: 'welcome-article',
-        slug: 'welcome-to-mangapress',
+        slug: 'welcome-to-NUYE',
         title: '「伝わる技術記事」を、もっと自由につくろう。',
         summary: '文章だけじゃない。図やコード、ストーリーを組み合わせて、あなたの知識を読みやすいかたちに。',
         category: 'お知らせ',
-        tags: ['MangaPress', 'はじめに'],
+        tags: ['NUYE', 'はじめに'],
         cover: '',
         content: {
             type: 'doc',
             content: [
-                { type: 'paragraph', content: [{ type: 'text', text: 'MangaPressへようこそ！ここでは、技術を「伝わるかたち」にするための新しい記事体験を紹介します。' }] },
+                { type: 'paragraph', content: [{ type: 'text', text: 'NUYEへようこそ！ここでは、技術を「伝わるかたち」にするための新しい記事体験を紹介します。' }] },
                 { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '書くことに、もっと夢中になれる場所' }] },
                 { type: 'paragraph', content: [{ type: 'text', text: 'テキストを入力して、見出しや画像、コードをツールバーから追加。Markdownを覚えなくても、直感的な操作だけで記事がつくれます。' }] },
                 { type: 'blockquote', content: [{ type: 'paragraph', content: [{ type: 'text', text: '知識をシェアすることが、誰かの「わかった！」につながる。' }] }] },
@@ -24,7 +24,7 @@ const demoArticles = [
         status: 'published',
         updatedAt: new Date().toISOString(),
         publishedAt: new Date().toISOString(),
-        authorId: 'mangapress',
+        authorId: 'NUYE',
     },
 ];
 function readLocal() {

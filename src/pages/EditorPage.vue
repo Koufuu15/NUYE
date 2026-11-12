@@ -89,7 +89,7 @@ function createCanvasItem(type, overrides = {}) {
         quote: { w: 240, h: 120, content: '大切なメッセージを、読者がすぐ見える位置に置きましょう。' },
         table: { w: 320, h: 180, content: '' },
         image: { w: 260, h: 150, content: '画像要素はブロック編集から追加できます。' },
-        code: { w: 260, h: 150, content: 'const article = "MangaPress";\nconsole.log(article);' },
+        code: { w: 260, h: 150, content: 'const article = "NUYE";\nconsole.log(article);' },
         shape: { w: 160, h: 110, content: '' },
         drawing: { w: 240, h: 160, content: '', },
         quiz: { w: 300, h: 220, content: '' },
@@ -791,7 +791,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="editor-app">
     <header class="editor-topbar">
-      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><span class="brand-mark"><BookOpen :size="17" /></span><b>Manga<span class="brand-accent">Press</span></b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
+      <div class="editor-top-left"><RouterLink to="/" class="editor-brand"><span class="brand-mark"><BookOpen :size="17" /></span><b>NU<span class="brand-accent">Y</span>E</b></RouterLink><span class="top-divider"></span><RouterLink to="/me" class="editor-back"><ArrowLeft :size="15" /><span>マイページ</span></RouterLink></div>
       <div class="editor-save-status" :class="{ 'save-failed': saveError }"><span class="save-dot"></span>{{ saveError || saveMessage }}</div>
       <div class="editor-top-actions"><button class="editor-preview-button" @click="openPreview"><Eye :size="15" />プレビュー</button><button class="button button-publish" :disabled="saving" @click="publishArticle">公開する <ArrowRight :size="15" /></button></div>
     </header>
