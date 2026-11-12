@@ -1,6 +1,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import {
+  Search,
+  FilePlus2,
+  ChevronDown,
+  Sparkles
+} from 'lucide-vue-next'
 import { getCurrentUser } from './lib/articles';
 import logoUrl from './assets/NUYE_logo.ico';
 const route = useRoute();

@@ -1,6 +1,15 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Sparkles,
+  Blocks,
+  ArrowDown,
+  PenLine
+} from 'lucide-vue-next';
 import { listArticles } from '../lib/articles';
+import ArticleCard from '../components/ArticleCard.vue';
 const articles = ref([]);
 const loading = ref(true);
 const featured = computed(() => articles.value[0]);

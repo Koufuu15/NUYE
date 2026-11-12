@@ -5,7 +5,7 @@ import ArticlePage from './pages/ArticlePage.vue';
 import EditorPage from './pages/EditorPage.vue';
 import AuthPage from './pages/AuthPage.vue';
 const router = createRouter({
-    history: createWebHistory(),
+    history: createWebHistory(import.meta.env.BASE_URL),
     scrollBehavior: () => ({ top: 0 }),
     routes: [
         { path: '/', component: HomePage },
