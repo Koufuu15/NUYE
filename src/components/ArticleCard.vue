@@ -1,11 +1,10 @@
-<script setup lang="ts">
-import { ArrowUpRight, Clock3 } from 'lucide-vue-next'
-import type { Article } from '../types'
-
-defineProps<{ article: Article; featured?: boolean }>()
-
-function formattedDate(value: string) {
-  return new Intl.DateTimeFormat('ja-JP', { month: 'short', day: 'numeric' }).format(new Date(value))
+<script setup>
+defineProps({
+    article: { type: Object, required: true },
+    featured: { type: Boolean, default: false },
+});
+function formattedDate(value) {
+    return new Intl.DateTimeFormat('ja-JP', { month: 'short', day: 'numeric' }).format(new Date(value));
 }
 </script>
 
