@@ -39,6 +39,19 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+      - name: Check build output
+        run: |
+          echo "=== Current directory ==="
+          pwd
+
+          echo "=== Dist directory ==="
+          ls -lah ./dist
+
+          echo "=== Dist files ==="
+          find ./dist -type f
+
+          echo "=== Build output index.html ==="
+          cat ./dist/index.html
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - name: Upload artifact
